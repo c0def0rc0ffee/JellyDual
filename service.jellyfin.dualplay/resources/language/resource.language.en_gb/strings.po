@@ -1,0 +1,256 @@
+# Kodi Media Center language file
+# Addon Name: Jellyfin Dual Play
+# Addon id: service.jellyfin.dualplay
+# Addon Provider: c0def0rc0ffee
+msgid ""
+msgstr ""
+"Project-Id-Version: service.jellyfin.dualplay\n"
+"Report-Msgid-Bugs-To: \n"
+"Language: en_GB\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+# -- Categories and groups ----------------------------------------------------
+
+msgctxt "#30000"
+msgid "Dual Play"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Role"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Connection"
+msgstr ""
+
+msgctxt "#30003"
+msgid "Timing"
+msgstr ""
+
+msgctxt "#30004"
+msgid "Start-up handshake"
+msgstr ""
+
+msgctxt "#30005"
+msgid "Drift correction (optional)"
+msgstr ""
+
+# -- General ------------------------------------------------------------------
+
+msgctxt "#30010"
+msgid "Enable dual play"
+msgstr ""
+
+msgctxt "#30011"
+msgid "Master switch. When off, this addon does nothing on either box."
+msgstr ""
+
+msgctxt "#30012"
+msgid "This box is the"
+msgstr ""
+
+msgctxt "#30013"
+msgid "Leader (sends commands)"
+msgstr ""
+
+msgctxt "#30014"
+msgid "Follower (receives commands)"
+msgstr ""
+
+msgctxt "#30015"
+msgid "Leader/Follower: one box drives, the other is driven. Sync Group: any number of boxes, all set to Sync Group member and listing each other on the Sync Group tab - whichever box starts something hosts it, and pause/resume from ANY box is echoed to all of them."
+msgstr ""
+
+msgctxt "#30016"
+msgid "Show notifications"
+msgstr ""
+
+msgctxt "#30017"
+msgid "On-screen popups when mirroring starts, when a device cannot be reached, and when a device joins the sync group. Notices that a device LEFT are always shown."
+msgstr ""
+
+msgctxt "#30018"
+msgid "When this box stops"
+msgstr ""
+
+msgctxt "#30019"
+msgid "What the follower does when playback stops here (or this box shuts down). \"Pause the others\" holds its place, so you can stop in one room and press play in another to carry on. In Sync Group mode the others always pause and are told which device left."
+msgstr ""
+
+msgctxt "#30030"
+msgid "Stop the others"
+msgstr ""
+
+msgctxt "#30031"
+msgid "Pause the others"
+msgstr ""
+
+msgctxt "#30032"
+msgid "Leave them playing"
+msgstr ""
+
+
+# -- Follower connection --------------------------------------------------------
+
+msgctxt "#30020"
+msgid "Follower address"
+msgstr ""
+
+msgctxt "#30021"
+msgid "IP address or hostname of the follower box. Pasting \"123.123.123.50:8080\" or a full URL also works, the port is split out automatically."
+msgstr ""
+
+msgctxt "#30022"
+msgid "Port"
+msgstr ""
+
+msgctxt "#30023"
+msgid "The follower's web server port, from Settings > Services > Control on the follower (default 8080)."
+msgstr ""
+
+msgctxt "#30024"
+msgid "Username"
+msgstr ""
+
+msgctxt "#30025"
+msgid "The follower's web server username (default \"kodi\"). Leave blank if the follower has authentication disabled."
+msgstr ""
+
+msgctxt "#30026"
+msgid "Password"
+msgstr ""
+
+msgctxt "#30027"
+msgid "The follower's web server password. Leave blank if the follower has authentication disabled."
+msgstr ""
+
+msgctxt "#30028"
+msgid "Test connection"
+msgstr ""
+
+msgctxt "#30029"
+msgid "Checks that the follower answers with these details and shows its Kodi version."
+msgstr ""
+
+# -- Timing ---------------------------------------------------------------------
+
+msgctxt "#30040"
+msgid "Start timeout (seconds)"
+msgstr ""
+
+msgctxt "#30041"
+msgid "How long the leader holds (paused) waiting for the follower to start playing before giving up. Raise it for a slow follower box or a remote server."
+msgstr ""
+
+msgctxt "#30042"
+msgid "Follower head start (ms)"
+msgstr ""
+
+msgctxt "#30043"
+msgid "How far ahead of the leader the follower is released, at start-up and on every resume. Raise it if the follower is consistently behind; lower it if it is ahead."
+msgstr ""
+
+msgctxt "#30044"
+msgid "Periodically re-align"
+msgstr ""
+
+msgctxt "#30045"
+msgid "Every so often, compare positions and re-seek the follower if it has drifted. Off by default; turn on if both screens are within earshot and slow drift bothers you."
+msgstr ""
+
+msgctxt "#30046"
+msgid "Check every (seconds)"
+msgstr ""
+
+msgctxt "#30047"
+msgid "How often the drift check runs."
+msgstr ""
+
+msgctxt "#30048"
+msgid "Re-seek threshold (seconds)"
+msgstr ""
+
+msgctxt "#30049"
+msgid "Re-seek the follower only if it is off by more than this many seconds."
+msgstr ""
+
+msgctxt "#30033"
+msgid "Sync Group member"
+msgstr ""
+
+
+# -- Sync Group -----------------------------------------------------------------
+
+msgctxt "#30050"
+msgid "Sync Group"
+msgstr ""
+
+msgctxt "#30051"
+msgid "This device"
+msgstr ""
+
+msgctxt "#30052"
+msgid "Device name"
+msgstr ""
+
+msgctxt "#30053"
+msgid "What the other boxes call this one when it pauses the group or leaves it. Leave blank to use this box's Kodi device name."
+msgstr ""
+
+msgctxt "#30070"
+msgid "Name"
+msgstr ""
+
+msgctxt "#30071"
+msgid "Address"
+msgstr ""
+
+msgctxt "#30072"
+msgid "Optional friendly name for this device, shown in notifications (e.g. \"Bedroom\"). Leave blank to use its address."
+msgstr ""
+
+msgctxt "#30073"
+msgid "IP address or hostname of this device, e.g. \"123.123.123.50\". Add \":port\" only if it uses a different port from the one on the Dual Play tab. Leave blank for an unused slot."
+msgstr ""
+
+msgctxt "#30060"
+msgid "Device 1"
+msgstr ""
+
+msgctxt "#30061"
+msgid "Device 2"
+msgstr ""
+
+msgctxt "#30062"
+msgid "Device 3"
+msgstr ""
+
+msgctxt "#30063"
+msgid "Device 4"
+msgstr ""
+
+msgctxt "#30064"
+msgid "Device 5"
+msgstr ""
+
+msgctxt "#30065"
+msgid "Device 6"
+msgstr ""
+
+msgctxt "#30066"
+msgid "Device 7"
+msgstr ""
+
+msgctxt "#30067"
+msgid "Device 8"
+msgstr ""
+
+msgctxt "#30068"
+msgid "Device 9"
+msgstr ""
+
+msgctxt "#30069"
+msgid "Device 10"
+msgstr ""

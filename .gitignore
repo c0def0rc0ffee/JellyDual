@@ -1,0 +1,31 @@
+# Local release tooling and notes
+/publish-github.sh
+/push-source.sh
+/publish.conf
+/release-mirror.conf
+/GITHUB-RELEASE-GUIDE.md
+/.publish-allow
+/Github repository
+
+# Convention output folders (root-anchored)
+/JellyDualPlay Dist/
+/JellyDualPlay Git/
+/JellyDualPlay App/
+
+# Local editor and tooling state (any dot folder except .github)
+.*/
+!.github/
+
+# Archives and transient files
+*.zip
+*.7z
+*.log
+*.tmp
+
+# Python bytecode (Kodi generates these next to the addon source)
+__pycache__/
+*.pyc
+
+# No secret files in this project: the follower's username/password are typed
+# into Kodi's addon settings and stored in Kodi userdata, never in the repo.
+# If that ever changes, list the secret file here explicitly by path.
