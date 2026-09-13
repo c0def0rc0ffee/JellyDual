@@ -1,11 +1,14 @@
-"""Jellyfin Dual Play - Kodi service entry point.
-
+"""
+<summary>
+Jellyfin Dual Play: Kodi service entry point.
+</summary>
+<remarks>
 Two ways to run:
 
-Leader / Follower - two boxes, one-way. The leader mirrors play / pause / seek
+Leader / Follower: two boxes, one-way. The leader mirrors play / pause / seek
 / stop onto the follower; the follower's own addon does nothing.
 
-Sync Group - any number of boxes (up to 10 others each), all equal. Whichever
+Sync Group: any number of boxes (up to 10 others each), all equal. Whichever
 box starts something becomes that session's HOST and opens the item on every
 other member; the others never start a session of their own. After that,
 pause and resume from ANY member are echoed to every member regardless of
@@ -14,11 +17,12 @@ told which box left. A box that comes online mid-session joins by itself and
 picks the item up at the right position.
 
 The loop problem: a mirrored command lands on a box as a perfectly ordinary
-player event, indistinguishable from the user pressing the button - so the box
+player event, indistinguishable from the user pressing the button, so the box
 would mirror it onwards forever. To break the loop, every command is announced
 via JSONRPC.NotifyAll before it is sent; the receiving addon hears the
 announcement (Monitor.onNotification) and knows the next matching event is not
 a user action.
+</remarks>
 """
 
 import json
@@ -344,7 +348,7 @@ class Controller(object):
             return
         if self.is_group:
             # Leaving the group: everyone else holds their place, and is told
-            # who dropped out. A natural end is not a departure - the others
+            # who dropped out. A natural end is not a departure, so the others
             # reach their own end moments later.
             if ended:
                 return
@@ -437,7 +441,7 @@ class Controller(object):
             return
         if self.suspend or not player.isPlaying():
             return
-        # Don't queue up behind a start-up handshake - it can hold the lock for
+        # Don't queue up behind a start-up handshake, because it can hold the lock for
         # the whole start timeout, and by the time it finishes it has re-synced
         # anyway. Skip this round instead.
         if not self.lock.acquire(False):
@@ -455,7 +459,7 @@ class Controller(object):
                     continue
                 delta = local - pos['time']
                 if abs(delta) > self.drift_tolerance:
-                    log('drift %.1fs on %s - re-seeking' % (delta, p.label))
+                    log('drift %.1fs on %s, re-seeking' % (delta, p.label))
                     self._send(i, p, 'seek', lambda q: q.seek(local))
         finally:
             self.lock.release()

@@ -1,3 +1,4 @@
+# SUPERSEDED on 12/09/2026 by build-zip.sh in this folder (Linux build). Kept for reference only, do not run.
 # Builds two versioned zips straight from the project root, plus the local
 # runnable copy:
 #   JellyDualPlay Dist\service.jellyfin.dualplay-v<version>.zip      - the Kodi-installable addon
@@ -27,7 +28,7 @@ $addonXml = Join-Path $root "$product\addon.xml"
 $repoOnlyFiles = @('README.md', 'CHANGELOG.md', 'SETUP.md', 'VERSION',
                    '.gitignore', '.gitattributes', 'build-zip.ps1', '*.example.*')
 
-# Excluded from BOTH zips. There are no secret files in this project - the
+# Excluded from BOTH zips. There are no secret files in this project, so the
 # follower's credentials are typed into Kodi's addon settings and live in Kodi
 # userdata, never here. Add any future secret to this list by name.
 $secretFiles = @('*.tmp', '*.zip', '*.7z')
@@ -58,7 +59,7 @@ if ($stamped -ne $xml) {
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 
 function Stage-And-Zip {
-    # NB: param must not be named ExcludeDirs - PS variable names are
+    # NB: param must not be named ExcludeDirs, because PS variable names are
     # case-insensitive, so it would shadow the script-level $excludeDirs.
     param([string]$StageName, [string[]]$ExcludeFiles, [string[]]$ExtraExcludeDirs, [string]$ZipPath)
 
@@ -88,7 +89,7 @@ Stage-And-Zip -StageName 'deploy' `
     -ZipPath (Join-Path $distDir "$product-v$version.zip")
 
 # Local runnable copy: an exact mirror of the Dist zip contents.
-# /MIR removes anything not in the stage - never hand-edit this folder,
+# /MIR removes anything not in the stage, so never hand-edit this folder,
 # fix the source and rebuild.
 robocopy (Join-Path $stage 'deploy') $appDir /MIR /NFL /NDL /NJH | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy failed mirroring $appDir (exit $LASTEXITCODE)" }

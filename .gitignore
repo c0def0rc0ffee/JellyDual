@@ -29,3 +29,51 @@ __pycache__/
 # No secret files in this project: the follower's username/password are typed
 # into Kodi's addon settings and stored in Kodi userdata, never in the repo.
 # If that ever changes, list the secret file here explicitly by path.
+
+# Added 12/09/2026 (Linux packaging sweep)
+# Internal ops docs and local only leftovers, never published
+/Packaging.md
+/PROJECT_NOTES.md
+/.review/
+/build.conf
+/deploy_to_programfiles.ps1
+/deploy_log.txt
+@eaDir/
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Secrets, both cases because matching is case sensitive. Nothing secret
+# lives in this tree; the patterns stop one being added by accident.
+.env
+.env.*
+*credential*
+*CREDENTIAL*
+*Credential*
+*password*
+*PASSWORD*
+*Password*
+*secret*
+*SECRET*
+*Secret*
+*token*
+*TOKEN*
+*Token*
+*cred*
+*CRED*
+*sftp*
+*SFTP*
+*ftp*
+*FTP*
+*.pem
+*.key
+*.pfx
+id_rsa*
+connection.txt
+*config.local*
+*.bak
+
+# Dev only files inside the add-on folder, dropped from both zips by build-zip.sh
+/service.jellyfin.dualplay/**/*_test.py
+/service.jellyfin.dualplay/**/test_*.py
+# (test.py is the settings dialog check script and ships, so it is not listed)

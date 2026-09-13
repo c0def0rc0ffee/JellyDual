@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <!-- Labels/help are ids into resources/language/resource.language.en_gb/strings.po.
      Keep labels short: the settings list truncates long ones. Put the detail in
-     the help string - it shows full-width at the bottom of the dialog. -->
+     the help string, which shows full-width at the bottom of the dialog. -->
 <settings version="1">
   <section id="service.jellyfin.dualplay">
 

@@ -1,4 +1,8 @@
-"""Shared helpers for Jellyfin Dual Play."""
+"""
+<summary>
+Shared helpers for Jellyfin Dual Play.
+</summary>
+"""
 
 import base64
 import json

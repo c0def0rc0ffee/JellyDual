@@ -60,7 +60,7 @@ msgid "Follower (receives commands)"
 msgstr ""
 
 msgctxt "#30015"
-msgid "Leader/Follower: one box drives, the other is driven. Sync Group: any number of boxes, all set to Sync Group member and listing each other on the Sync Group tab - whichever box starts something hosts it, and pause/resume from ANY box is echoed to all of them."
+msgid "Leader/Follower: one box drives, the other is driven. Sync Group: any number of boxes, all set to Sync Group member and listing each other on the Sync Group tab. Whichever box starts something hosts it, and pause/resume from ANY box is echoed to all of them."
 msgstr ""
 
 msgctxt "#30016"

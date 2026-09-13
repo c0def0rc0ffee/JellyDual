@@ -1,4 +1,8 @@
-"""Settings button: check that the other box(es) are reachable."""
+"""
+<summary>
+Settings button: check that the other box(es) are reachable.
+</summary>
+"""
 
 import os
 import sys

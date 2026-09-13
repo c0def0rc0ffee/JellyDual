@@ -1,4 +1,8 @@
-"""Simulate the sync-group state machine against fake Kodi boxes."""
+"""
+<summary>
+Simulate the sync-group state machine against fake Kodi boxes.
+</summary>
+"""
 import json
 import sys
 import time
@@ -256,7 +260,7 @@ ctl.active_path = 'plugin://x'
 ctl.on_peer_cmd('pause')
 ctl.on_pause(FakePlayer())
 assert bed.calls == [] and kit.calls == []
-ok('mirrored pause suppressed - no infinite echo')
+ok('mirrored pause suppressed, no infinite echo')
 
 print('\n== resume from any device restarts the group ==')
 ctl, bed, kit = fresh()
