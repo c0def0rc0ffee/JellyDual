@@ -41,7 +41,7 @@ drift that crept in.
 > folder.
 
 Install the zip on **both** boxes: *Settings → Add-ons → Install from zip file*.
-(You may need *Unknown sources* enabled first.)
+(You may need *Unknown sources* enabled first.) Or install the [DeliciousCoffee repository](https://github.com/c0def0rc0ffee/DeliciousCoffee) once and Kodi installs and updates it for you.
 
 ### On the follower
 
@@ -69,10 +69,21 @@ installed so you can swap the roles later without reinstalling.
 Hit **Test connection**. It should report the follower's Kodi
 version.
 
+### Sync Group
+
+For three or more boxes, or to control playback from any of them: on **every**
+box set **This box is the** to the Sync Group member option, give the box a
+**Device name**, switch on HTTP remote control exactly as for the follower
+above, and list every other box on the **Sync Group** tab (up to ten devices,
+each a name and an address). Any box can then start, pause or resume, and a
+box switched on mid-film joins at the right position. **SETUP.md** walks
+through it step by step.
+
 ## Settings worth knowing
 
 | Setting | What it does |
 | --- | --- |
+| **Show notifications** | On-screen popups when mirroring starts, when a device cannot be reached, and when a device joins the sync group. A notice that a device left is always shown. |
 | **Start timeout (seconds)** | How long the leader holds before giving up. Raise it if the follower is a slow box or the library is remote. |
 | **Follower head start (ms)** | How far ahead of the leader the follower is released. Raise it if the follower is consistently *behind*; lower it if it's ahead. |
 | **Periodically re-align** | Off by default. Turn on if the two screens are within earshot and slow drift bothers you. |
