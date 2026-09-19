@@ -1,0 +1,436 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<!--
+  <summary>
+  Kodi settings definition for Jellyfin Dual Play: the general, follower
+  connection, timing and sync group categories.
+  </summary>
+  <remarks>
+  Labels/help are ids into resources/language/resource.language.en_gb/strings.po.
+  Keep labels short: the settings list truncates long ones. Put the detail in
+  the help string, which shows full-width at the bottom of the dialog.
+  </remarks>
+-->
+<settings version="1">
+  <section id="service.jellyfin.dualplay">
+
+    <category id="general" label="30000">
+      <group id="1" label="30001">
+        <setting id="enabled" type="boolean" label="30010" help="30011">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="role" type="integer" label="30012" help="30015">
+          <level>0</level>
+          <default>1</default>
+          <constraints>
+            <options>
+              <option label="30013">0</option>
+              <option label="30014">1</option>
+              <option label="30033">2</option>
+            </options>
+          </constraints>
+          <control type="list" format="string"/>
+        </setting>
+        <setting id="notify" type="boolean" label="30016" help="30017">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="stop_action" type="integer" label="30018" help="30019">
+          <level>0</level>
+          <default>0</default>
+          <constraints>
+            <options>
+              <option label="30030">0</option>
+              <option label="30031">1</option>
+              <option label="30032">2</option>
+            </options>
+          </constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">0</dependency>
+          </dependencies>
+          <control type="list" format="string"/>
+        </setting>
+      </group>
+
+      <group id="2" label="30002">
+        <setting id="peer_host" type="string" label="30020" help="30021">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">0</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30020</heading>
+          </control>
+        </setting>
+        <setting id="peer_port" type="integer" label="30022" help="30023">
+          <level>0</level>
+          <default>8080</default>
+          <constraints><minimum>1</minimum><maximum>65535</maximum></constraints>
+          <dependencies>
+            <dependency type="visible">
+              <or>
+                <condition setting="role" operator="is">0</condition>
+                <condition setting="role" operator="is">2</condition>
+              </or>
+            </dependency>
+          </dependencies>
+          <control type="edit" format="integer">
+            <heading>30022</heading>
+          </control>
+        </setting>
+        <setting id="peer_user" type="string" label="30024" help="30025">
+          <level>0</level>
+          <default>kodi</default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible">
+              <or>
+                <condition setting="role" operator="is">0</condition>
+                <condition setting="role" operator="is">2</condition>
+              </or>
+            </dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30024</heading>
+          </control>
+        </setting>
+        <setting id="peer_pass" type="string" label="30026" help="30027">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible">
+              <or>
+                <condition setting="role" operator="is">0</condition>
+                <condition setting="role" operator="is">2</condition>
+              </or>
+            </dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30026</heading>
+            <hidden>true</hidden>
+          </control>
+        </setting>
+        <setting id="test" type="action" label="30028" help="30029">
+          <level>0</level>
+          <data>RunScript(special://home/addons/service.jellyfin.dualplay/test.py)</data>
+          <dependencies>
+            <dependency type="visible">
+              <or>
+                <condition setting="role" operator="is">0</condition>
+                <condition setting="role" operator="is">2</condition>
+              </or>
+            </dependency>
+          </dependencies>
+          <control type="button" format="action">
+            <close>false</close>
+          </control>
+        </setting>
+      </group>
+    </category>
+
+    <category id="syncgroup" label="30050">
+      <group id="1" label="30051">
+        <setting id="device_name" type="string" label="30052" help="30053">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <control type="edit" format="string">
+            <heading>30052</heading>
+          </control>
+        </setting>
+      </group>
+      <group id="2" label="30060">
+        <setting id="dev1_name" type="string" label="30070" help="30072">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30070</heading>
+          </control>
+        </setting>
+        <setting id="dev1_host" type="string" label="30071" help="30073">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30071</heading>
+          </control>
+        </setting>
+      </group>
+      <group id="3" label="30061">
+        <setting id="dev2_name" type="string" label="30070" help="30072">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30070</heading>
+          </control>
+        </setting>
+        <setting id="dev2_host" type="string" label="30071" help="30073">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30071</heading>
+          </control>
+        </setting>
+      </group>
+      <group id="4" label="30062">
+        <setting id="dev3_name" type="string" label="30070" help="30072">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30070</heading>
+          </control>
+        </setting>
+        <setting id="dev3_host" type="string" label="30071" help="30073">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30071</heading>
+          </control>
+        </setting>
+      </group>
+      <group id="5" label="30063">
+        <setting id="dev4_name" type="string" label="30070" help="30072">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30070</heading>
+          </control>
+        </setting>
+        <setting id="dev4_host" type="string" label="30071" help="30073">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30071</heading>
+          </control>
+        </setting>
+      </group>
+      <group id="6" label="30064">
+        <setting id="dev5_name" type="string" label="30070" help="30072">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30070</heading>
+          </control>
+        </setting>
+        <setting id="dev5_host" type="string" label="30071" help="30073">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30071</heading>
+          </control>
+        </setting>
+      </group>
+      <group id="7" label="30065">
+        <setting id="dev6_name" type="string" label="30070" help="30072">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30070</heading>
+          </control>
+        </setting>
+        <setting id="dev6_host" type="string" label="30071" help="30073">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30071</heading>
+          </control>
+        </setting>
+      </group>
+      <group id="8" label="30066">
+        <setting id="dev7_name" type="string" label="30070" help="30072">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30070</heading>
+          </control>
+        </setting>
+        <setting id="dev7_host" type="string" label="30071" help="30073">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30071</heading>
+          </control>
+        </setting>
+      </group>
+      <group id="9" label="30067">
+        <setting id="dev8_name" type="string" label="30070" help="30072">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30070</heading>
+          </control>
+        </setting>
+        <setting id="dev8_host" type="string" label="30071" help="30073">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30071</heading>
+          </control>
+        </setting>
+      </group>
+      <group id="10" label="30068">
+        <setting id="dev9_name" type="string" label="30070" help="30072">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30070</heading>
+          </control>
+        </setting>
+        <setting id="dev9_host" type="string" label="30071" help="30073">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30071</heading>
+          </control>
+        </setting>
+      </group>
+      <group id="11" label="30069">
+        <setting id="dev10_name" type="string" label="30070" help="30072">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30070</heading>
+          </control>
+        </setting>
+        <setting id="dev10_host" type="string" label="30071" help="30073">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible" setting="role" operator="is">2</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>30071</heading>
+          </control>
+        </setting>
+      </group>
+    </category>
+
+    <category id="advanced" label="30003">
+      <group id="1" label="30004">
+        <setting id="start_timeout" type="integer" label="30040" help="30041">
+          <level>0</level>
+          <default>25</default>
+          <constraints><minimum>5</minimum><step>1</step><maximum>120</maximum></constraints>
+          <control type="slider" format="integer">
+            <popup>false</popup>
+          </control>
+        </setting>
+        <setting id="lead_ms" type="integer" label="30042" help="30043">
+          <level>0</level>
+          <default>400</default>
+          <constraints><minimum>0</minimum><step>50</step><maximum>3000</maximum></constraints>
+          <control type="slider" format="integer">
+            <popup>false</popup>
+          </control>
+        </setting>
+      </group>
+      <group id="2" label="30005">
+        <setting id="drift_check" type="boolean" label="30044" help="30045">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="drift_interval" type="integer" label="30046" help="30047">
+          <level>0</level>
+          <default>120</default>
+          <constraints><minimum>15</minimum><step>15</step><maximum>900</maximum></constraints>
+          <dependencies>
+            <dependency type="enable" setting="drift_check" operator="is">true</dependency>
+          </dependencies>
+          <control type="slider" format="integer"><popup>false</popup></control>
+        </setting>
+        <setting id="drift_tolerance" type="integer" label="30048" help="30049">
+          <level>0</level>
+          <default>5</default>
+          <constraints><minimum>1</minimum><step>1</step><maximum>60</maximum></constraints>
+          <dependencies>
+            <dependency type="enable" setting="drift_check" operator="is">true</dependency>
+          </dependencies>
+          <control type="slider" format="integer"><popup>false</popup></control>
+        </setting>
+      </group>
+    </category>
+
+  </section>
+</settings>
