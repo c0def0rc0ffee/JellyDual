@@ -8,6 +8,7 @@ import base64
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import xbmc
@@ -25,6 +26,8 @@ JELLYFIN_ID_RE = re.compile(
 )
 
 JELLYFIN_PLUGIN_PLAY = 'plugin://plugin.video.jellyfin/?mode=play&id=%s'
+JELLYFIN_PLUGIN_PREFIX = 'plugin://plugin.video.jellyfin/'
+JELLYFIN_ITEM_ID = re.compile(r'[0-9a-f]{32}')
 
 
 MAX_DEVICES = 10  # fixed slots: Kodi settings cannot grow a list at runtime
@@ -577,6 +580,24 @@ def resolve_playable_path():
     return normalize_path(path)
 
 
+def jellyfin_plugin_play_id(path):
+    """
+    <summary>
+    The Jellyfin item id in a plugin.video.jellyfin play URL, or '' for any other URL.
+    </summary>
+    <param name="path">A plugin:// URL as Kodi reports it.</param>
+    <returns>The 32 character id, lower cased and without dashes, or '' when the URL is not a play URL or carries no usable id.</returns>
+    <remarks>
+    Only mode=play URLs qualify: a playlist or browse URL is left alone by the caller.
+    </remarks>
+    """
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+    if (query.get('mode') or [''])[0] != 'play':
+        return ''
+    item_id = (query.get('id') or [''])[0].replace('-', '').strip().lower()
+    return item_id if JELLYFIN_ITEM_ID.fullmatch(item_id) else ''
+
+
 def normalize_path(path):
     """
     <summary>
@@ -585,7 +606,11 @@ def normalize_path(path):
     <remarks>
     A resolved Jellyfin direct-stream URL is rebuilt as a plugin:// play URL so
     the other box streams through its own Jellyfin session rather than
-    piggy-backing on this one's. Everything else passes through.
+    piggy-backing on this one's. A Jellyfin plugin play URL is rebuilt from
+    its item id alone, because a library entry also carries this box's own
+    Kodi database id ("&dbid=12"), which means a different film on the other
+    box. Everything else passes through, so every box arrives at the same
+    string for the same item and can tell a group open from a user's start.
     </remarks>
     """
     if not path:
@@ -594,6 +619,10 @@ def normalize_path(path):
     if '/addons/screensaver.' in path.replace('\\', '/'):
         # A clip played by a video screensaver is never something to mirror.
         return ''
+
+    if path.startswith(JELLYFIN_PLUGIN_PREFIX):
+        item_id = jellyfin_plugin_play_id(path)
+        return JELLYFIN_PLUGIN_PLAY % item_id if item_id else path
 
     if path.startswith('plugin://'):
         return path

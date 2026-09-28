@@ -103,6 +103,12 @@ class Controller(object):
         self.expect = {}              # action -> deadline; commands announced
                                       # by a peer, so the matching player event
                                       # is not a user action
+        self.expect_path = None       # the path a peer's 'open' announcement
+                                      # named, so a start of something else
+                                      # is still recognised as the user's
+        self.left_path = None         # what this box last stopped, so an
+                                      # idle box is not pulled back into a
+                                      # paused film it walked out of
         self.dead = {}                # peer index -> retry-after; unreachable
                                       # boxes are skipped for a while so every
                                       # button press doesn't stall on timeouts
@@ -181,16 +187,20 @@ class Controller(object):
         """
         return self.is_group and time.time() < self.expect.get(action, 0)
 
-    def on_peer_cmd(self, action):
+    def on_peer_cmd(self, action, data=None):
         """
         <summary>
         A group member announced an imminent command.
         </summary>
+        <param name="action">open, stop, pause, play or seek.</param>
+        <param name="data">For open, a dict whose path member is what is being opened; None otherwise.</param>
         """
         if not self.is_group:
             return
         ttl = 90 if action == 'open' else 3
         self.expect[action] = time.time() + ttl
+        if action == 'open':
+            self.expect_path = normalize_path((data or {}).get('path') or '') or None
         log('group announced: %s' % action, xbmc.LOGDEBUG)
 
     def on_peer_gone(self, name):
@@ -218,12 +228,14 @@ class Controller(object):
         <summary>
         Whether a peer's 'open' announcement is still pending, clearing it either way.
         </summary>
-        <returns>True when one was pending and in date.</returns>
+        <returns>A tuple: True when one was pending and in date, and the path it named or None.</returns>
         <remarks>
         Called once per on_start so a stale announcement cannot be reused.
         </remarks>
         """
-        return time.time() < self.expect.pop('open', 0)
+        pending = time.time() < self.expect.pop('open', 0)
+        path, self.expect_path = self.expect_path, None
+        return pending, path
 
     def _alive(self, peers):
         """
@@ -298,7 +310,9 @@ class Controller(object):
         </summary>
         <param name="player">The DualPlayer.</param>
         <remarks>
-        Hosting: pause this box, stop every reachable peer, open the item on each, wait up to start_timeout for them to report a duration, pause and seek them to this box's position, start them, then release this box after lead_ms. Runs on its own thread from onAVStarted, under the lock.
+        Hosting: pause this box, stop every reachable peer whatever it is doing, open the item on each, wait up to start_timeout for them to report a duration, pause and seek them to this box's position, start them, then release this box after lead_ms. Runs on its own thread from onAVStarted, under the lock.
+
+        Kodi raises onAVStarted again when a stream inside the same playback is switched (the Jellyfin add-on picks the audio track just after start), so a start event for the item already in session is ignored rather than hosted a second time; hosting it again would have every box stop and reopen the others in turn.
 
         A screensaver clip, an unresolvable path and a stop mid-handshake all abort; the mid-handshake stop pauses the boxes already started (group) or applies the stop action to them (leader).
         </remarks>
@@ -308,12 +322,24 @@ class Controller(object):
         if screensaver_running():
             log('video screensaver playback, not mirroring')
             return
-        if self._consume_open():
+        path = normalize_path(resolve_playable_path())
+        if path and path == self.active_path and player.isPlaying():
+            log('start event for the item already in session; ignoring', xbmc.LOGDEBUG)
+            return
+        pending, announced = self._consume_open()
+        if pending and announced and path and announced != path:
+            # The group opened one thing on us but the user started another
+            # (or the announced open never played): this is the user's start.
+            log('group announced %s but this box started %s; hosting'
+                % (announced, path))
+            pending = False
+        if pending:
             # Another member opened this item on us, or we joined a session:
             # follow, don't host.
             with self.lock:
-                self.active_path = resolve_playable_path()
+                self.active_path = path
                 self.session_host = False
+                self.left_path = None
             log('opened by the group; following')
             return
         with self.lock:
@@ -323,11 +349,11 @@ class Controller(object):
             timeout, lead_ms = self.start_timeout, self.lead_ms
             stop_action = self.stop_action
 
-            path = resolve_playable_path()
             if not path:
                 log('could not resolve a playable path; not mirroring', xbmc.LOGWARNING)
                 return
             log('hosting %s' % path)
+            self.left_path = None
 
             self.suspend = True
             try:
@@ -347,8 +373,11 @@ class Controller(object):
                 if self.monitor.waitForAbort(0.5):
                     return
                 for i in list(targets):
+                    # The announcement names the path so the box can tell
+                    # this open from its user starting something else.
                     if not self._send(i, targets[i], 'open',
-                                      lambda q: q.open_file(path)):
+                                      lambda q: q.open_file(path),
+                                      {'path': path}):
                         targets.pop(i)
 
                 deadline = time.time() + timeout
@@ -477,6 +506,8 @@ class Controller(object):
         was = self.active_path
         self.active_path = None
         self.session_host = False
+        if was:
+            self.left_path = was
         if not self.armed or self.suspend or not was:
             return
         if self._expected('stop'):
@@ -499,8 +530,12 @@ class Controller(object):
     def try_join(self, player):
         """
         <summary>
-        Idle group member: if someone is playing, join them where they are.
+        Idle group member: if someone has a film open, join them where they are.
         </summary>
+        <param name="player">The DualPlayer.</param>
+        <remarks>
+        A playing member is joined and this box plays from that position. A member that is paused is joined paused at the same point, so a box switched on after the lounge paused comes up ready and play anywhere carries the whole group on; nothing is unpaused by joining. The film this box itself stopped is not rejoined while the others sit paused in it, since the user walked out of it on purpose. A box already playing anything is never hijacked.
+        </remarks>
         """
         if not (self.armed and self.is_group) or self.active_path:
             return
@@ -517,25 +552,29 @@ class Controller(object):
                     log('%s: %s' % (p.label, exc), xbmc.LOGDEBUG)
                     self.dead[i] = time.time() + 30
                     continue
-                # Only join something actually running: a group that everyone
-                # has paused should stay paused.
-                if pos and pos['speed'] and pos['total'] > 0:
-                    found = (p, pos)
-                    break
+                if not pos or pos['total'] <= 0:
+                    continue
+                path = normalize_path(pos['path'])
+                if not path:
+                    continue
+                if not pos['speed'] and path == self.left_path:
+                    # Paused in the film this box stopped: the user left it.
+                    continue
+                found = (p, pos, path)
+                break
             if not found:
                 return
 
-            peer, pos = found
-            path = normalize_path(pos['path'])
-            if not path:
-                return
-            log('joining %s already playing %s at %.1fs'
-                % (peer.label, path, pos['time']))
+            peer, pos, path = found
+            log('joining %s, %s %s at %.1fs'
+                % (peer.label, 'playing' if pos['speed'] else 'paused in',
+                   path, pos['time']))
 
             self.suspend = True
             try:
                 # Our own onAVStarted must follow, not start a new session.
                 self.expect['open'] = time.time() + 90
+                self.expect_path = path
                 local_open(path)
 
                 deadline = time.time() + self.start_timeout
@@ -550,24 +589,29 @@ class Controller(object):
                 if not ready:
                     log('join failed: playback did not start here', xbmc.LOGWARNING)
                     self.expect.pop('open', None)
+                    self.expect_path = None
                     return
 
-                # Re-read the host's position: it moved on while we loaded.
+                # Re-read the host's position: it moved on while we loaded,
+                # or was paused meanwhile.
                 try:
-                    fresh = peer.now_playing()
+                    fresh = peer.now_playing() or pos
                 except PeerError:
-                    fresh = None
-                target = (fresh or pos)['time'] + 0.3
+                    fresh = pos
+                playing = bool(fresh['speed'])
+                target = fresh['time'] + (0.3 if playing else 0.0)
                 local_seek(target)
                 self.monitor.waitForAbort(0.2)
-                local_set_playing(True)
+                # A paused group stays paused: play anywhere carries it on.
+                local_set_playing(playing)
                 self.active_path = path
                 self.session_host = False
+                self.left_path = None
             finally:
                 self.ignore_until = time.time() + 1.0
                 self.suspend = False
 
-            notify('Joined %s' % peer.label)
+            notify('Joined %s%s' % (peer.label, '' if playing else ' (paused)'))
             self._broadcast('joined', None, {'name': self.me})
         finally:
             self.lock.release()
@@ -735,23 +779,27 @@ class DualMonitor(xbmc.Monitor):
         </summary>
         <param name="sender">The announcing add-on; anything but this add-on's id is ignored.</param>
         <param name="method">'Other.<action>' as Kodi delivers a NotifyAll message.</param>
-        <param name="data">JSON text; for left and joined, a dict carrying the sender's device name.</param>
+        <param name="data">JSON text; for left and joined, a dict carrying the sender's device name; for open, a dict carrying the path being opened.</param>
         """
         if sender != ADDON_ID:
             return
         action = method.split('.', 1)[-1]
-        if action in ('left', 'joined'):
-            name = ''
+        payload = None
+        if data:
             try:
-                name = (json.loads(data) or {}).get('name', '')
+                payload = json.loads(data)
             except Exception:
-                pass
+                payload = None
+        if not isinstance(payload, dict):
+            payload = None
+        if action in ('left', 'joined'):
+            name = (payload or {}).get('name', '')
             if action == 'left':
                 self.ctl.on_peer_gone(name)
             else:
                 self.ctl.on_peer_joined(name)
             return
-        self.ctl.on_peer_cmd(action)
+        self.ctl.on_peer_cmd(action, payload)
 
 
 def main():

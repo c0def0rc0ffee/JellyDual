@@ -556,14 +556,34 @@ assert any('Joined Bedroom' in n for n in NOTES), NOTES
 assert any(c.startswith('announce:joined') for c in bed.calls), bed.calls
 ok('joins the running box, converts stream URL to plugin://, resumes in place')
 
-print('\n== a paused group is not joined ==')
+print('\n== a paused group is joined paused at the same point ==')
 ctl, bed, kit = fresh()
 service.local_open = lambda p: opened.append(p)
 del opened[:]
+del seeks[:]
+del local[:]
+bed.playing = {'path': 'plugin://x', 'time': 50.0, 'total': 5400.0, 'speed': 0}
+ctl.try_join(FakePlayer(playing=False))
+assert opened == ['plugin://x'], opened
+assert seeks and abs(seeks[0] - 50.0) < 0.01, seeks
+assert local == [False], local
+assert ctl.active_path == 'plugin://x' and not ctl.session_host
+assert any('Joined Bedroom (paused)' in n for n in NOTES), NOTES
+ok('everyone-paused session joined at the paused position and left paused (no auto-unpause)')
+
+print('\n== a paused film this box stopped is not rejoined ==')
+ctl, bed, kit = fresh()
+del opened[:]
+ctl.active_path = 'plugin://x'
+ctl.on_stop()                       # the user stopped here: the others pause
+assert ctl.left_path == 'plugin://x'
 bed.playing = {'path': 'plugin://x', 'time': 50.0, 'total': 5400.0, 'speed': 0}
 ctl.try_join(FakePlayer(playing=False))
 assert opened == [], opened
-ok('everyone-paused session left alone (no auto-unpause)')
+bed.playing['speed'] = 1            # someone pressed play there: rejoin
+ctl.try_join(FakePlayer(playing=False))
+assert opened == ['plugin://x'], opened
+ok('walked out of a film: not pulled back while it sits paused, rejoins once it plays')
 
 print('\n== already playing locally: no join ==')
 ctl, bed, kit = fresh()
@@ -572,6 +592,64 @@ bed.playing = {'path': 'plugin://x', 'time': 50.0, 'total': 5400.0, 'speed': 1}
 ctl.try_join(FakePlayer(playing=True))
 assert opened == []
 ok('busy box does not hijack itself')
+
+print('\n== override: a member already playing something else is taken over ==')
+ctl, bed, kit = fresh()
+ABC = 'plugin://plugin.video.jellyfin/?mode=play&id=abc'
+service.resolve_playable_path = lambda: ABC
+bed.playing = {'path': 'plugin://other', 'time': 700.0, 'total': 5400.0, 'speed': 1}
+kit.playing = {'path': 'plugin://other', 'time': 700.0, 'total': 5400.0, 'speed': 0}
+del local[:]
+ctl.on_start(FakePlayer())
+for b in (bed, kit):
+    assert b.acts() == ['stop', 'open', 'pause', 'seek:900.0', 'play'], b.acts()
+    assert b.playing['path'] == ABC, b.playing
+    assert ('announce:open:' + json.dumps({'path': ABC})) in b.calls, b.calls
+ok('playing or paused members are stopped and reopened on the new item; the open announcement names it')
+
+print('\n== a repeat start event does not restart the session ==')
+del bed.calls[:]
+del kit.calls[:]
+del local[:]
+ctl.on_start(FakePlayer())          # Kodi raises onAVStarted again (audio track switch)
+assert bed.calls == [] and kit.calls == [] and local == [], (bed.calls, kit.calls, local)
+assert ctl.session_host and ctl.active_path == ABC
+ok('host: second onAVStarted for the same item ignored, no stop and reopen storm')
+ctl, bed, kit = fresh()
+ctl.on_peer_cmd('open', {'path': ABC})
+ctl.on_start(FakePlayer())
+assert not ctl.session_host and ctl.active_path == ABC
+ctl.on_start(FakePlayer())
+assert bed.calls == [] and kit.calls == [], (bed.calls, kit.calls)
+assert not ctl.session_host
+ok('member: second onAVStarted for the same item ignored, does not turn host')
+
+print('\n== an announced open for a different item does not capture the user\'s start ==')
+ctl, bed, kit = fresh()
+ctl.on_peer_cmd('open', {'path': 'plugin://plugin.video.jellyfin/?mode=play&id=zzz'})
+ctl.on_start(FakePlayer())          # the user started ...id=abc here
+for b in (bed, kit):
+    assert b.acts() == ['stop', 'open', 'pause', 'seek:900.0', 'play'], b.acts()
+assert ctl.session_host and 'open' not in ctl.expect and ctl.expect_path is None
+ok('stale or mismatched open announcement: this box hosts what the user started')
+ctl, bed, kit = fresh()
+HEX = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
+ctl.on_peer_cmd('open', {'path': 'http://srv:8096/Videos/%s/stream?static=true' % HEX.upper()})
+service.resolve_playable_path = lambda: 'plugin://plugin.video.jellyfin/?mode=play&id=%s&dbid=7' % HEX
+ctl.on_start(FakePlayer())
+assert bed.calls == [] and kit.calls == [] and not ctl.session_host, (bed.calls, kit.calls)
+assert ctl.active_path == 'plugin://plugin.video.jellyfin/?mode=play&id=%s' % HEX
+ok('announced stream URL and the local library path for the same item match: follows')
+service.resolve_playable_path = lambda: ABC
+
+print('\n== Jellyfin plugin paths are rebuilt from the item id ==')
+assert normalize_path('plugin://plugin.video.jellyfin/?mode=play'
+                      '&id=A1B2C3D4-E5F6-0718-293A-4B5C6D7E8F90&dbid=12&server=s1') == \
+    'plugin://plugin.video.jellyfin/?mode=play&id=' + HEX
+assert normalize_path('plugin://plugin.video.jellyfin/?mode=playlist&id=' + HEX) == \
+    'plugin://plugin.video.jellyfin/?mode=playlist&id=' + HEX
+assert normalize_path(ABC) == ABC
+ok('dbid and server dropped and the id canonicalised; playlist URLs and unknown ids left alone')
 
 print('\n== dead box: skipped, others still served ==')
 ctl, bed, kit = fresh()

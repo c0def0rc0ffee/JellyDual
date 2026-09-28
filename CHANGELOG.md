@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.1.3
+
+- Starting something on any box now always takes over the group, whatever the
+  others are doing. A box that the group opened an item on, but then has
+  something else started on it by its user, recognises that as the user's
+  start and hosts it instead of treating it as the group's open: open
+  announcements now name the item.
+- A second start event for the item already in session (Kodi raises one when
+  the Jellyfin add-on switches audio track just after start) is ignored
+  instead of hosting the session again, which had the boxes stopping and
+  reopening each other in turn.
+- A box that comes online while the group is paused joins paused at the same
+  point; play anywhere carries everyone on. A box is not pulled back into a
+  paused film it stopped itself. A playing group is joined as before.
+- Jellyfin plugin paths are rebuilt from the item id alone before being sent
+  on, dropping this box's own Kodi database id, which means a different film
+  on the other box.
+
+## 2.1.2
+
+- Wording only.
+
 ## 2.1.1
 
 - Ignore video screensaver playback (`VideoScreensaverRunning` flag); group

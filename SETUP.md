@@ -1,6 +1,6 @@
 # Jellyfin Dual Play: Setup Guide
 
-Step-by-step setup. Current as of **v2.1.1**.
+Step-by-step setup. Current as of **v2.1.3**.
 
 Two ways to run it:
 
@@ -146,9 +146,13 @@ land. Everyone re-aligns to the box you pressed play on.
   "N of M devices started" notification.
 - An unreachable box is skipped for 30 seconds after a failed command, so a
   powered-off room never stalls your remote presses.
-- A box that comes online joins only a group that is actually **playing**. If
-  everyone is paused, it stays out until someone presses play, deliberate, so
-  a waking box can't unpause your house.
+- A box that comes online joins whatever the group has open. If the group is
+  playing it plays from the same point; if everyone is paused it comes up
+  paused at that point and waits, so a waking box never unpauses your house.
+  Press play anywhere and the whole group carries on. A box is not pulled
+  back into a paused film it stopped itself.
+- Starting something on any box takes over the group, whatever the others are
+  doing: they stop and open the new item.
 - A box already playing something else is never hijacked by the group.
 - Departure notices ("… left the sync group") are shown even if you've turned
   **Show notifications** off.
