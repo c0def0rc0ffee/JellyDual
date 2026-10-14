@@ -27,6 +27,7 @@ a user action.
 
 import json
 import os
+import queue
 import sys
 import threading
 import time
@@ -58,6 +59,9 @@ STOP_ACTION_PAUSE = 1
 STOP_ACTION_NONE = 2
 
 JOIN_POLL_SECONDS = 10   # how often an idle group member looks for a session
+DEAD_SECONDS = 30        # back off after a failed command before a box is probed again
+PROBE_TIMEOUT = 2        # seconds a reachability probe waits for a box marked dead
+EXIT_TIMEOUT = 2         # seconds each departure command waits while Kodi exits
 
 # Raised on the Home window by video screensavers (Dreadnought, the old
 # Video Screensaver add-on) while their clip plays. Kodi has no way to mark
@@ -77,6 +81,21 @@ def screensaver_running():
     return xbmcgui.Window(HOME_WINDOW_ID).getProperty(SCREENSAVER_PROPERTY) == 'true'
 
 
+def peer_key(peer):
+    """
+    <summary>
+    The key a box is tracked under in the dead map: its address and port.
+    </summary>
+    <param name="peer">A Peer, or anything with host and port attributes.</param>
+    <returns>'host:port' as a string.</returns>
+    <remarks>
+    Keyed by address rather than slot index so that editing the device slots
+    while a handshake is in flight cannot make a back off apply to the wrong box.
+    </remarks>
+    """
+    return '%s:%s' % (peer.host, peer.port)
+
+
 class Controller(object):
     """
     <summary>
@@ -84,13 +103,18 @@ class Controller(object):
     </summary>
     <remarks>
     One instance for the service's lifetime, shared between Kodi's player callbacks, the monitor callbacks and the main loop, so the long running handshake and the join hold the lock.
+
+    Player events are not handled on the thread that delivers them: DualPlayer posts them to a queue that one worker thread drains in order, so a slow box never blocks Kodi's callback delivery and a pause is still handled before the resume that followed it. Commands to the boxes go out in parallel, one thread per box, and a box that failed is left out of every command until a background probe from the main loop finds it answering again.
     </remarks>
     """
     def __init__(self):
         """
         <summary>
-        Set up the lock, the echo suppression state, the reused monitor and the peer list from the settings.
+        Set up the locks, the echo suppression state, the reused monitor, the event queue and its worker, and the peer list from the settings.
         </summary>
+        <remarks>
+        The worker is a daemon thread, so it never keeps Kodi from exiting; on_exit stops it cleanly.
+        </remarks>
         """
         self.lock = threading.RLock()
         self.suspend = False          # ignore our own programmatic player events
@@ -109,10 +133,18 @@ class Controller(object):
         self.left_path = None         # what this box last stopped, so an
                                       # idle box is not pulled back into a
                                       # paused film it walked out of
-        self.dead = {}                # peer index -> retry-after; unreachable
-                                      # boxes are skipped for a while so every
-                                      # button press doesn't stall on timeouts
+        self.peers = []
+        self.peers_lock = threading.Lock()  # guards peers and dead together
+        self.dead = {}                # peer_key -> probe-after; a box that
+                                      # failed is left out of every command
+                                      # until a probe finds it answering
+        self.probing = False          # a probe round is running
         self.monitor = xbmc.Monitor()  # one instance, reused by the wait loops
+        self.queue = queue.Queue()    # player events, drained in order
+        self.worker = threading.Thread(target=self._drain, daemon=True)
+        self.worker.start()
+        self.last_drift = time.time()
+        self.last_join = time.time()
         self.reload_settings()
 
     # == settings =============================================================
@@ -120,10 +152,10 @@ class Controller(object):
     def reload_settings(self):
         """
         <summary>
-        Re-read every setting and rebuild the peer list for the current role; forgets which boxes were marked unreachable.
+        Re-read every setting and rebuild the peer list for the current role, keeping the back off of any box that is still configured.
         </summary>
         <remarks>
-        Called at start and from DualMonitor.onSettingsChanged, which runs on another thread; on_start snapshots what it needs for that reason.
+        Called at start and from DualMonitor.onSettingsChanged, which runs on another thread. The new list and the pruned dead map are swapped in together under peers_lock, and on_start snapshots the list under the same lock, so an in flight handshake always iterates one consistent list.
         </remarks>
         """
         a = addon()
@@ -138,13 +170,26 @@ class Controller(object):
         self.stop_action = a.getSettingInt('stop_action')
         self.me = local_device_name()
         if self.is_group:
-            self.peers = group_from_settings()
+            peers = group_from_settings()
         elif self.role == ROLE_LEADER:
             p = peer_from_settings()
-            self.peers = [p] if p.configured else []
+            peers = [p] if p.configured else []
         else:
-            self.peers = []
-        self.dead = {}
+            peers = []
+        keep = set(peer_key(p) for p in peers)
+        with self.peers_lock:
+            self.peers = peers
+            self.dead = dict((k, v) for k, v in self.dead.items() if k in keep)
+
+    def _snapshot_peers(self):
+        """
+        <summary>
+        A copy of the peer list taken under peers_lock.
+        </summary>
+        <returns>A new list of Peer.</returns>
+        """
+        with self.peers_lock:
+            return list(self.peers)
 
     @property
     def armed(self):
@@ -171,21 +216,32 @@ class Controller(object):
         except Exception:
             return 0.0
 
-    def _ours(self):
+    def _ours(self, at=None):
         """
         <summary>
         True while a player event is (or echoes) our own programmatic one.
         </summary>
+        <param name="at">When Kodi delivered the event, or None for now; the queue may hand an event over later than it arrived.</param>
+        <returns>True when suspend is set or the event falls inside the echo window.</returns>
         """
-        return self.suspend or time.time() < self.ignore_until
+        return self.suspend or (at or time.time()) < self.ignore_until
 
-    def _expected(self, action):
+    def _expected(self, action, at=None):
         """
         <summary>
-        True if a peer announced this command, so the event is not a user's.
+        True if a peer announced this command, so the event is not a user's; the announcement is used up either way.
         </summary>
+        <param name="action">pause, play, seek or stop.</param>
+        <param name="at">When Kodi delivered the event, or None for now.</param>
+        <returns>True when an announcement for the action was pending and in date.</returns>
+        <remarks>
+        One announcement covers one event. Leaving it in place until it expired meant a user's genuine press of the same button within three seconds of a mirrored one was swallowed too.
+        </remarks>
         """
-        return self.is_group and time.time() < self.expect.get(action, 0)
+        if not self.is_group:
+            return False
+        deadline = self.expect.pop(action, 0)
+        return (at or time.time()) < deadline
 
     def on_peer_cmd(self, action, data=None):
         """
@@ -240,19 +296,41 @@ class Controller(object):
     def _alive(self, peers):
         """
         <summary>
-        The peers not currently marked unreachable, with their indexes.
+        The peers not currently marked dead, with their keys.
         </summary>
         <param name="peers">A list of Peer.</param>
-        <returns>A list of (index, peer).</returns>
+        <returns>A list of (key, peer) in slot order.</returns>
+        <remarks>
+        A dead box stays out until probe_dead finds it answering; the command path never waits on one.
+        </remarks>
         """
-        now = time.time()
-        return [(i, p) for i, p in enumerate(peers) if self.dead.get(i, 0) <= now]
+        return [(peer_key(p), p) for p in peers if peer_key(p) not in self.dead]
 
-    def _send(self, i, p, action, fn, data=None):
+    def _mark_dead(self, key, p, exc):
+        """
+        <summary>
+        Record a failed box: log it, tell the user once, and keep it out of every command until a probe succeeds.
+        </summary>
+        <param name="key">The box's peer_key.</param>
+        <param name="p">The Peer, for its label.</param>
+        <param name="exc">What went wrong, for the log.</param>
+        """
+        log('%s: %s' % (p.label, exc), xbmc.LOGWARNING)
+        if key not in self.dead:
+            notify('%s unreachable' % p.label)
+        self.dead[key] = time.time() + DEAD_SECONDS
+
+    def _send(self, key, p, action, fn, data=None):
         """
         <summary>
         Announce (group mode) then run one command against one box.
         </summary>
+        <param name="key">The box's peer_key, for the dead map.</param>
+        <param name="p">The Peer to drive.</param>
+        <param name="action">What to announce: open, stop, pause, play, seek, left or joined; blank announces nothing.</param>
+        <param name="fn">Callable taking the Peer that runs the command, or None to announce only.</param>
+        <param name="data">Announcement payload, or None.</param>
+        <returns>True when both the announcement and the command succeeded.</returns>
         """
         try:
             if self.is_group and action:
@@ -261,11 +339,43 @@ class Controller(object):
                 fn(p)
             return True
         except PeerError as exc:
-            log('%s: %s' % (p.label, exc), xbmc.LOGWARNING)
-            if self.dead.get(i, 0) <= time.time():
-                notify('%s unreachable' % p.label)
-            self.dead[i] = time.time() + 30
+            self._mark_dead(key, p, exc)
             return False
+
+    def _fan_out(self, targets, action, fn, data=None):
+        """
+        <summary>
+        Run one command against several boxes at the same time, one thread each, and wait for all of them.
+        </summary>
+        <param name="targets">A list of (key, Peer).</param>
+        <param name="action">Passed to _send.</param>
+        <param name="fn">Passed to _send.</param>
+        <param name="data">Passed to _send.</param>
+        <returns>A dict of key to Peer for the boxes the command succeeded on.</returns>
+        <remarks>
+        A box that times out costs its own timeout and nobody else's: the slowest box bounds the round, not the sum of them.
+        </remarks>
+        """
+        done = {}
+
+        def run(key, p):
+            """
+            <summary>
+            Thread body: one _send, recording the box in done on success.
+            </summary>
+            <param name="key">The box's peer_key.</param>
+            <param name="p">The Peer.</param>
+            """
+            if self._send(key, p, action, fn, data):
+                done[key] = p
+
+        threads = [threading.Thread(target=run, args=(key, p), daemon=True)
+                   for key, p in targets]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        return done
 
     def _broadcast(self, action, fn, data=None):
         """
@@ -273,9 +383,12 @@ class Controller(object):
         Echo a command to every reachable member, host or not, whatever it
         is currently doing.
         </summary>
+        <param name="action">Passed to _send.</param>
+        <param name="fn">Passed to _send.</param>
+        <param name="data">Passed to _send.</param>
+        <returns>A dict of key to Peer for the boxes it reached.</returns>
         """
-        for i, p in self._alive(self.peers):
-            self._send(i, p, action, fn, data)
+        return self._fan_out(self._alive(self._snapshot_peers()), action, fn, data)
 
     def _pause_all(self):
         """
@@ -290,16 +403,96 @@ class Controller(object):
         <summary>
         Leader / Follower mode: apply the configured stop action.
         </summary>
+        <param name="peers_map">A dict of key to Peer to act on.</param>
+        <param name="action">One of the STOP_ACTION constants.</param>
         """
         if action == STOP_ACTION_NONE:
             log('leaving the other box playing')
         elif action == STOP_ACTION_PAUSE:
             log('pausing the other box')
-            for i, p in peers_map.items():
-                self._send(i, p, 'pause', lambda q: q.set_playing(False))
+            self._fan_out(list(peers_map.items()), 'pause', lambda q: q.set_playing(False))
         else:
-            for i, p in peers_map.items():
-                self._send(i, p, 'stop', lambda q: q.stop())
+            self._fan_out(list(peers_map.items()), 'stop', lambda q: q.stop())
+
+    # == dead boxes ===========================================================
+
+    def probe_dead(self, block=False):
+        """
+        <summary>
+        Ping every dead box whose back off has lapsed and re-admit the ones that answer.
+        </summary>
+        <param name="block">True runs the probe on this thread; False, the main loop's choice, runs it on a background thread so the service thread never waits on a box.</param>
+        <remarks>
+        One probe round at a time; a box that fails the probe gets another DEAD_SECONDS. Re-admission only ever happens here, so a powered off room is never retried on the command path.
+        </remarks>
+        """
+        now = time.time()
+        due = [key for key, when in self.dead.items() if when <= now]
+        if not due or self.probing:
+            return
+        self.probing = True
+        if block:
+            self._probe(due)
+        else:
+            threading.Thread(target=self._probe, args=(due,), daemon=True).start()
+
+    def _probe(self, keys):
+        """
+        <summary>
+        The probe round itself: ping each key with PROBE_TIMEOUT and update the dead map.
+        </summary>
+        <param name="keys">The peer keys to probe.</param>
+        """
+        try:
+            peers = dict((peer_key(p), p) for p in self._snapshot_peers())
+            for key in keys:
+                p = peers.get(key)
+                if p is None:
+                    self.dead.pop(key, None)   # no longer configured
+                    continue
+                try:
+                    p.ping(timeout=PROBE_TIMEOUT)
+                except PeerError as exc:
+                    log('%s still unreachable: %s' % (p.label, exc), xbmc.LOGDEBUG)
+                    self.dead[key] = time.time() + DEAD_SECONDS
+                    continue
+                self.dead.pop(key, None)
+                log('%s reachable again' % p.label)
+        finally:
+            self.probing = False
+
+    # == the event queue ======================================================
+
+    def post(self, fn, *args):
+        """
+        <summary>
+        Queue a player event handler to run on the worker thread, stamped with the time Kodi delivered it.
+        </summary>
+        <param name="fn">The handler, one of the on_ methods.</param>
+        <param name="args">Positional arguments for it; the delivery time is added as the at keyword.</param>
+        """
+        self.queue.put((fn, args, time.time()))
+
+    def _drain(self):
+        """
+        <summary>
+        Worker thread body: run queued handlers one at a time, in arrival order, until the None sentinel.
+        </summary>
+        <remarks>
+        A handler that raises is logged and the queue carries on; one bad event must not stop the service mirroring.
+        </remarks>
+        """
+        while True:
+            item = self.queue.get()
+            try:
+                if item is None:
+                    return
+                fn, args, at = item
+                fn(*args, at=at)
+            except Exception as exc:
+                log('player event handler failed: %s' % exc, xbmc.LOGERROR)
+            finally:
+                self.queue.task_done()
 
     # == player events ========================================================
 
@@ -345,7 +538,7 @@ class Controller(object):
         with self.lock:
             # Snapshot the settings we need: onSettingsChanged can swap them
             # from another thread while this handshake is still running.
-            peers = list(self.peers)
+            peers = self._snapshot_peers()
             timeout, lead_ms = self.start_timeout, self.lead_ms
             stop_action = self.stop_action
 
@@ -362,23 +555,19 @@ class Controller(object):
                     return
                 local_set_playing(False)
 
-                targets = {}
-                for i, p in self._alive(peers):
-                    if self._send(i, p, 'stop', lambda q: q.stop()):
-                        targets[i] = p
+                targets = self._fan_out(self._alive(peers), 'stop', lambda q: q.stop())
                 if not targets:
                     notify('No devices reachable')
                     local_set_playing(True)
                     return
                 if self.monitor.waitForAbort(0.5):
                     return
-                for i in list(targets):
-                    # The announcement names the path so the box can tell
-                    # this open from its user starting something else.
-                    if not self._send(i, targets[i], 'open',
-                                      lambda q: q.open_file(path),
-                                      {'path': path}):
-                        targets.pop(i)
+                # The announcement names the path so the box can tell
+                # this open from its user starting something else.
+                targets = self._fan_out(list(targets.items()), 'open',
+                                        lambda q: q.open_file(path),
+                                        {'path': path})
+                wanted = len(targets)
 
                 deadline = time.time() + timeout
                 ready = {}
@@ -392,15 +581,19 @@ class Controller(object):
                         else:
                             self._stop_peers(targets, stop_action)
                         return
-                    for i, p in list(targets.items()):
-                        if i in ready:
+                    for key, p in list(targets.items()):
+                        if key in ready:
                             continue
                         try:
                             pos = p.position()
-                        except PeerError:
+                        except PeerError as exc:
+                            # Died since it took the open: drop it rather
+                            # than pay its timeout on every poll.
+                            self._mark_dead(key, p, exc)
+                            targets.pop(key)
                             continue
                         if pos and pos['total'] > 0:
-                            ready[i] = p
+                            ready[key] = p
                     if len(ready) == len(targets):
                         break
                     if self.monitor.waitForAbort(0.5):
@@ -411,18 +604,15 @@ class Controller(object):
                     self.active_path = None
                     local_set_playing(True)  # don't strand this box paused
                     return
-                if len(ready) < len(targets):
-                    notify('%d of %d devices started' % (len(ready), len(targets)))
+                if len(ready) < wanted:
+                    notify('%d of %d devices started' % (len(ready), wanted))
 
-                for i, p in ready.items():
-                    self._send(i, p, 'pause', lambda q: q.set_playing(False))
+                self._fan_out(list(ready.items()), 'pause', lambda q: q.set_playing(False))
                 target_t = self._local_time(player)
-                for i, p in ready.items():
-                    self._send(i, p, 'seek', lambda q: q.seek(target_t))
+                self._fan_out(list(ready.items()), 'seek', lambda q: q.seek(target_t))
                 if self.monitor.waitForAbort(0.3):
                     return
-                for i, p in ready.items():
-                    self._send(i, p, 'play', lambda q: q.set_playing(True))
+                self._fan_out(list(ready.items()), 'play', lambda q: q.set_playing(True))
                 self.active_path = path
                 self.session_host = True
 
@@ -446,29 +636,31 @@ class Controller(object):
                 self.ignore_until = time.time() + 1.0
                 self.suspend = False
 
-    def on_pause(self, player):
+    def on_pause(self, player, at=None):
         """
         <summary>
         Kodi paused here: pause the others, unless the event is our own or one a peer announced.
         </summary>
         <param name="player">The DualPlayer.</param>
+        <param name="at">When Kodi delivered the event; None means now.</param>
         """
-        if not self.armed or self._ours() or not self.active_path:
+        if not self.armed or self._ours(at) or not self.active_path:
             return
-        if self._expected('pause'):
+        if self._expected('pause', at):
             return
         self._pause_all()
 
-    def on_resume(self, player):
+    def on_resume(self, player, at=None):
         """
         <summary>
         Kodi resumed here: re-seek every member to just ahead of this box and start them, whoever the host is.
         </summary>
         <param name="player">The DualPlayer.</param>
+        <param name="at">When Kodi delivered the event; None means now.</param>
         """
-        if not self.armed or self._ours() or not self.active_path:
+        if not self.armed or self._ours(at) or not self.active_path:
             return
-        if self._expected('play'):
+        if self._expected('play', at):
             return
         # Any member may restart the group, host or not. Re-align on every
         # resume; this is what keeps loose sync honest. This box is already
@@ -479,26 +671,28 @@ class Controller(object):
         self.monitor.waitForAbort(0.2)
         self._broadcast('play', lambda p: p.set_playing(True))
 
-    def on_seek(self, player):
+    def on_seek(self, player, at=None):
         """
         <summary>
         Kodi seeked here: send the new position to every member, unless a peer announced the seek.
         </summary>
         <param name="player">The DualPlayer.</param>
+        <param name="at">When Kodi delivered the event; None means now.</param>
         """
-        if not self.armed or self._ours() or not self.active_path:
+        if not self.armed or self._ours(at) or not self.active_path:
             return
-        if self._expected('seek'):
+        if self._expected('seek', at):
             return
         t = self._local_time(player)
         self._broadcast('seek', lambda p: p.seek(t))
 
-    def on_stop(self, ended=False):
+    def on_stop(self, ended=False, at=None):
         """
         <summary>
         Playback stopped or ended here: leave the session and deal with the other boxes according to the mode.
         </summary>
         <param name="ended">True from onPlayBackEnded, when the item ran to its end.</param>
+        <param name="at">When Kodi delivered the event; None means now.</param>
         <remarks>
         Group mode: a natural end does nothing, since the others reach their own end moments later; a stop pauses everyone and broadcasts 'left'. Leader mode: applies the stop action, except that a natural end under the pause action leaves the follower alone.
         </remarks>
@@ -510,7 +704,7 @@ class Controller(object):
             self.left_path = was
         if not self.armed or self.suspend or not was:
             return
-        if self._expected('stop'):
+        if self._expected('stop', at):
             return
         if self.is_group:
             # Leaving the group: everyone else holds their place, and is told
@@ -523,7 +717,33 @@ class Controller(object):
             return
         if ended and self.stop_action == STOP_ACTION_PAUSE:
             return
-        self._stop_peers(dict(self._alive(self.peers)), self.stop_action)
+        self._stop_peers(dict(self._alive(self._snapshot_peers())), self.stop_action)
+
+    def on_exit(self):
+        """
+        <summary>
+        Kodi is shutting down: stop the worker, then send the departure the mode calls for if a session is still open here.
+        </summary>
+        <remarks>
+        Kodi's own OnStop for the item may still be queued when the abort lands, so the worker is given a moment to run it (which clears active_path); if the session is still open after that, the departure is sent directly with EXIT_TIMEOUT per box so shutdown is not held up by an unresponsive one. Group mode pauses the others and tells them who left; leader mode applies the stop action.
+        </remarks>
+        """
+        self.queue.put(None)
+        self.worker.join(3)
+        was = self.active_path
+        if not was or not self.armed:
+            return
+        self.active_path = None
+        self.session_host = False
+        peers = self._alive(self._snapshot_peers())
+        for _, p in peers:
+            p.timeout = EXIT_TIMEOUT
+        log('exiting with a session open; sending the departure')
+        if self.is_group:
+            self._fan_out(peers, 'pause', lambda q: q.set_playing(False))
+            self._fan_out(peers, 'left', None, {'name': self.me})
+        else:
+            self._stop_peers(dict(peers), self.stop_action)
 
     # == joining a session already in progress ================================
 
@@ -545,12 +765,11 @@ class Controller(object):
             return
         try:
             found = None
-            for i, p in self._alive(self.peers):
+            for key, p in self._alive(self._snapshot_peers()):
                 try:
                     pos = p.now_playing()
                 except PeerError as exc:
-                    log('%s: %s' % (p.label, exc), xbmc.LOGDEBUG)
-                    self.dead[i] = time.time() + 30
+                    self._mark_dead(key, p, exc)
                     continue
                 if not pos or pos['total'] <= 0:
                     continue
@@ -608,6 +827,11 @@ class Controller(object):
                 self.session_host = False
                 self.left_path = None
             finally:
+                # Our own onAVStarted was blocked by suspend, so the announced
+                # open above was never consumed. Clear it here, or a restart
+                # of the same film within 90 s would follow instead of host.
+                self.expect.pop('open', None)
+                self.expect_path = None
                 self.ignore_until = time.time() + 1.0
                 self.suspend = False
 
@@ -642,19 +866,47 @@ class Controller(object):
             if self.suspend or not self.active_path:
                 return
             local = self._local_time(player)
-            for i, p in self._alive(self.peers):
+            for key, p in self._alive(self._snapshot_peers()):
                 try:
                     pos = p.position()
-                except PeerError:
+                except PeerError as exc:
+                    self._mark_dead(key, p, exc)
                     continue
                 if not pos or pos['speed'] == 0:
                     continue
                 delta = local - pos['time']
                 if abs(delta) > self.drift_tolerance:
                     log('drift %.1fs on %s, re-seeking' % (delta, p.label))
-                    self._send(i, p, 'seek', lambda q: q.seek(local))
+                    self._send(key, p, 'seek', lambda q: q.seek(local))
         finally:
             self.lock.release()
+
+    # == the main loop's work =================================================
+
+    def tick(self, player):
+        """
+        <summary>
+        One pass of the main loop: probe dead boxes, run the drift check and the join poll when their intervals are due.
+        </summary>
+        <param name="player">The DualPlayer.</param>
+        <remarks>
+        Both the drift check and the join attempt are wrapped so one exception is logged and the service carries on; an unguarded drift check once ended the loop for the rest of the Kodi session.
+        </remarks>
+        """
+        now = time.time()
+        self.probe_dead()
+        if self.drift_check and now - self.last_drift >= self.drift_interval:
+            self.last_drift = now
+            try:
+                self.check_drift(player)
+            except Exception as exc:  # never let the loop die on a drift check
+                log('drift check failed: %s' % exc, xbmc.LOGWARNING)
+        if self.is_group and now - self.last_join >= JOIN_POLL_SECONDS:
+            self.last_join = now
+            try:
+                self.try_join(player)
+            except Exception as exc:  # never let the loop die on a join attempt
+                log('join attempt failed: %s' % exc, xbmc.LOGWARNING)
 
 
 class DualPlayer(xbmc.Player):
@@ -663,7 +915,7 @@ class DualPlayer(xbmc.Player):
     Kodi player callbacks forwarded to the Controller.
     </summary>
     <remarks>
-    onAVStarted hands off to a thread because the handshake blocks for up to the start timeout and Kodi's callbacks must return promptly.
+    onAVStarted hands off to a thread because the handshake blocks for up to the start timeout and Kodi's callbacks must return promptly. Every other event is posted to the controller's queue for the same reason: the handler talks to the other boxes, and a box that is slow to answer must not hold up the thread Kodi delivers events on. One worker drains the queue, so the order Kodi raised the events in is kept.
     </remarks>
     """
     def __init__(self, controller):
@@ -687,61 +939,61 @@ class DualPlayer(xbmc.Player):
     def onPlayBackPaused(self):
         """
         <summary>
-        Kodi hook: forwarded to on_pause.
+        Kodi hook: queued for on_pause.
         </summary>
         """
-        self.ctl.on_pause(self)
+        self.ctl.post(self.ctl.on_pause, self)
 
     def onPlayBackResumed(self):
         """
         <summary>
-        Kodi hook: forwarded to on_resume.
+        Kodi hook: queued for on_resume.
         </summary>
         """
-        self.ctl.on_resume(self)
+        self.ctl.post(self.ctl.on_resume, self)
 
     def onPlayBackSeek(self, seek_time, seek_offset):
         """
         <summary>
-        Kodi hook: forwarded to on_seek; the arguments are unused because the position is read back from the player.
+        Kodi hook: queued for on_seek; the arguments are unused because the position is read back from the player.
         </summary>
         <param name="seek_time">Unused.</param>
         <param name="seek_offset">Unused.</param>
         """
-        self.ctl.on_seek(self)
+        self.ctl.post(self.ctl.on_seek, self)
 
     def onPlayBackSeekChapter(self, chapter):
         """
         <summary>
-        Kodi hook: a chapter jump is treated as a seek.
+        Kodi hook: a chapter jump is treated as a seek and queued for on_seek.
         </summary>
         <param name="chapter">Unused.</param>
         """
-        self.ctl.on_seek(self)
+        self.ctl.post(self.ctl.on_seek, self)
 
     def onPlayBackStopped(self):
         """
         <summary>
-        Kodi hook: forwarded to on_stop as a user stop.
+        Kodi hook: queued for on_stop as a user stop.
         </summary>
         """
-        self.ctl.on_stop()
+        self.ctl.post(self.ctl.on_stop, False)
 
     def onPlayBackEnded(self):
         """
         <summary>
-        Kodi hook: forwarded to on_stop as a natural end.
+        Kodi hook: queued for on_stop as a natural end.
         </summary>
         """
-        self.ctl.on_stop(ended=True)
+        self.ctl.post(self.ctl.on_stop, True)
 
     def onPlayBackError(self):
         """
         <summary>
-        Kodi hook: a playback failure is treated as a stop.
+        Kodi hook: a playback failure is treated as a stop and queued for on_stop.
         </summary>
         """
-        self.ctl.on_stop()
+        self.ctl.post(self.ctl.on_stop, False)
 
 
 class DualMonitor(xbmc.Monitor):
@@ -805,10 +1057,10 @@ class DualMonitor(xbmc.Monitor):
 def main():
     """
     <summary>
-    Service entry point: build the controller, player and monitor, then loop until Kodi exits, checking drift and looking for a session to join on their own intervals.
+    Service entry point: build the controller, player and monitor, then loop until Kodi exits, handing each pass to Controller.tick; on exit, send the departure for any session still open.
     </summary>
     <remarks>
-    A failing join attempt is logged and the loop carries on.
+    The loop body lives in Controller.tick so it can be tested; tick guards the drift check and the join attempt so neither can end the loop.
     </remarks>
     """
     controller = Controller()
@@ -818,22 +1070,12 @@ def main():
         % (controller.me, controller.role,
            [p.label for p in controller.peers] or 'empty'))
 
-    last_drift = time.time()
-    last_join = time.time()
     while not monitor.abortRequested():
         if monitor.waitForAbort(2):
             break
-        now = time.time()
-        if controller.drift_check and now - last_drift >= controller.drift_interval:
-            last_drift = now
-            controller.check_drift(player)
-        if controller.is_group and now - last_join >= JOIN_POLL_SECONDS:
-            last_join = now
-            try:
-                controller.try_join(player)
-            except Exception as exc:  # never let the loop die on a join attempt
-                log('join attempt failed: %s' % exc, xbmc.LOGWARNING)
+        controller.tick(player)
 
+    controller.on_exit()
     log('service stopped')
     del player
     del monitor

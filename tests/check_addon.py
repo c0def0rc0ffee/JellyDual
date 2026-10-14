@@ -17,6 +17,7 @@ Usage:
 </remarks>
 """
 
+import ast
 import os
 import re
 import sys
@@ -71,6 +72,14 @@ TOKEN_SHAPES = re.compile(r'ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AK
 # Private and CGNAT address ranges. Example addresses in docs and tests are
 # 123.123.123.x only, so any of these is a real address by definition.
 PRIVATE_IP = re.compile(r'\b(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01])|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7]))\.\d{1,3}\.\d{1,3}\b')
+# A long dash written as an escape or an entity rather than as itself, which a
+# search for the character cannot see: the Python and JavaScript backslash u
+# and backslash U forms, the named entities and the decimal and hex numeric
+# entities, hex case insensitively.
+ESCAPED_DASH = re.compile(r'\\u201[345]|\\U0000201[345]|&[mn]dash;|&#821[123];|&#x201[345];',
+                          re.IGNORECASE)
+# The oldest Python the add-on must parse under: Kodi 19 bundles 3.8.
+PYTHON_FLOOR = (3, 8)
 
 failures = []
 
@@ -164,31 +173,45 @@ def walk_text_files(root):
 def check_python(root):
     """
     <summary>
-    Compile every .py file, recording a failure for each syntax error.
+    Compile every .py file and parse it as PYTHON_FLOOR syntax, recording a failure for each syntax error.
     </summary>
     <param name="root">Where to start.</param>
+    <remarks>
+    The build box runs a newer Python than Kodi bundles, so a plain compile proves nothing about 3.8: ast.parse with feature_version refuses syntax newer than the floor (walrus is 3.8 and allowed; match, parenthesised context managers and the like are not).
+    </remarks>
     """
     for folder, name in walk_text_files(root):
         if not name.endswith('.py'):
             continue
         path = os.path.join(folder, name)
+        text = read(path)
         try:
-            compile(read(path), path, 'exec')
+            compile(text, path, 'exec')
         except SyntaxError as exc:
             fail('{} does not compile: line {}: {}'.format(os.path.relpath(path, root), exc.lineno, exc.msg))
+            continue
+        try:
+            ast.parse(text, path, feature_version=PYTHON_FLOOR)
+        except SyntaxError as exc:
+            fail('{} needs Python newer than {}.{}: line {}: {}'.format(
+                os.path.relpath(path, root), PYTHON_FLOOR[0], PYTHON_FLOOR[1], exc.lineno, exc.msg))
 
 
 def check_house_rules(root):
     """
     <summary>
-    Scan every text file for dashes, attribution trailers, credential shapes and private addresses, and every file name for a secret looking name.
+    Scan every text file for dashes (as characters, escapes or entities), attribution trailers, credential shapes and private addresses, and every file name for a secret looking name.
     </summary>
     <param name="root">Where to start.</param>
     <remarks>
-    This file exempts itself from the trailer, token and address checks because it has to spell them out.
+    This file exempts itself from the trailer, token, address and escaped dash checks because it has to spell them out.
     </remarks>
     """
-    dashes = ('\u2014', '\u2013')  # em dash and en dash, spelled as escapes so this file passes its own check
+    # Em dash and en dash by code point: the publish kit's safety scan looks
+    # for the backslash u escape of either in .py files, so spelling them as
+    # escapes here would block the publish. The gate's own check below only
+    # looks for the characters themselves and this file was never caught by it.
+    dashes = (chr(0x2014), chr(0x2013))
     for folder, name in walk_text_files(root):
         relative = os.path.relpath(os.path.join(folder, name), root)
         if SECRET_NAMES.search(name):
@@ -202,6 +225,8 @@ def check_house_rules(root):
         for line_number, line in enumerate(text.splitlines(), 1):
             if any(dash in line for dash in dashes):
                 fail('{}:{} contains a dash character that the house rules disallow'.format(relative, line_number))
+            if ESCAPED_DASH.search(line) and name != 'check_addon.py':
+                fail('{}:{} contains a dash written as an escape or an entity'.format(relative, line_number))
             if 'Co-Authored-By' in line and name != 'check_addon.py':
                 fail('{}:{} carries an attribution trailer'.format(relative, line_number))
             if TOKEN_SHAPES.search(line) and name != 'check_addon.py':

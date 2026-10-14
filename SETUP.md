@@ -1,6 +1,6 @@
 # Jellyfin Dual Play: Setup Guide
 
-Step-by-step setup. Current as of **v2.1.3**.
+Step-by-step setup. Current as of **v2.1.4**.
 
 Two ways to run it:
 
@@ -19,7 +19,7 @@ behaviour change.)
 - Both running the **Jellyfin for Kodi** addon, signed in to the **same
   Jellyfin server**, and in the **same mode**, either both "add-on" (dynamic)
   or both library-sync (native).
-- The addon zip: `JellyDualPlay Dist/service.jellyfin.dualplay-v<version>.zip`.
+- The addon zip: `JellyDualPlay Dist/service.jellyfin.dualplay-<version>.zip`.
 
 Decide which box is the **leader** (the one you drive with a remote) and which
 is the **follower** (the one that copies it). Control is one-way: the follower's
@@ -185,7 +185,7 @@ search `kodi.log` for it.
 | Follower consistently behind | Raise **Follower head start**. |
 | Follower consistently ahead | Lower **Follower head start**. |
 | Slow drift over a long film | Turn on **Periodically re-align**, or just pause/resume once. |
-| Follower keeps playing after leader stops | Check **When this box stops** is set to *Stop the follower*. If it is, that shouldn't happen since v1.0.1, check the log and the network. A hard power-off of the leader always leaves the follower playing: the stop/pause command is sent by the leader, and a dead box sends nothing. |
+| Follower keeps playing after leader stops | Check **When this box stops** is set to *Stop the others*. If it is, that shouldn't happen since v1.0.1, check the log and the network. A hard power-off of the leader always leaves the follower playing: the stop/pause command is sent by the leader, and a dead box sends nothing. |
 | Both boxes fight / playback restarts in a loop | Both boxes are set to Leader and pointed at each other. Set one to Follower. |
 | Leader stuck paused after a failed start | Shouldn't happen since v1.0.1, press play; then check the log for the underlying peer error. |
 

@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.1.4
+
+- A powered-off box no longer delays the others: commands go to every box at
+  the same time, a box that fails is left out until a background probe finds
+  it answering again, and that probe never runs on the command path.
+- Player events are handled off Kodi's callback thread, in order, so a slow
+  box cannot hold up Kodi.
+- Restarting the same film within 90 seconds of joining a session now hosts
+  it properly instead of playing alone.
+- A genuine pause, play, seek or stop within three seconds of a mirrored one
+  is no longer swallowed.
+- Exiting Kodi with a session open now sends the departure (pause the
+  others, or the leader's stop action) even when Kodi's own stop event is
+  still queued.
+- A failing drift check no longer ends the service for the rest of the
+  session.
+- Editing the device slots mid-handshake can no longer apply one box's back
+  off to another slot.
+- Test connection: a toast names each box as it is tried, unreachable boxes
+  get a numbered checklist, and a second press while a run is in progress is
+  refused.
+- Clearer message when the address answers but is not Kodi's JSON-RPC port;
+  a trailing colon on an address is ignored instead of breaking the URL.
+- addon.xml summary and description now mention Sync Group. SETUP.md names
+  the zip without the v and the "Stop the others" option correctly.
+
 ## 2.1.3
 
 - Starting something on any box now always takes over the group, whatever the

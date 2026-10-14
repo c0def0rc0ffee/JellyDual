@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # <summary>
-# Packaging build for the Jellyfin Dual Play Kodi add-on (service.jellyfin.dualplay). Builds two
+# Build script for the Jellyfin Dual Play Kodi add-on (service.jellyfin.dualplay). Builds two
 # versioned zips straight from the project root, plus the local run copy:
 #   JellyDualPlay Dist/service.jellyfin.dualplay-<version>.zip  Kodi installable add-on zip.
 #       Kodi's "Install from zip file" needs the add-on folder at the zip
@@ -271,8 +271,18 @@ echo "Built: $git_zip ($(zip_size_kb "$git_zip") KB)"
 # 7) Post build verification. Do not trust the staging: read the archives
 #    back and refuse to keep a zip that carries a local only file, a secret
 #    looking name, version control or a backslash entry.
+# Turn one .git/info/exclude glob into an extended regex for one path segment:
+# a dot is literal, * matches within a segment, ? matches one character.
+glob_to_regex() {
+    local g="$1"
+    g="${g//./\\.}"
+    g="${g//\*/[^/]*}"
+    g="${g//\?/[^/]}"
+    printf '%s' "$g"
+}
+
 verify_zip() {
-    local archive="$1" listing
+    local archive="$1" listing pat clean
     unzip -tq "$archive" >/dev/null || die "$archive fails unzip -t"
     listing="$(unzip -Z1 "$archive")"
     if grep -q '\\' <<< "$listing"; then
@@ -281,9 +291,19 @@ verify_zip() {
     if grep -Ei 'cred|secret|passw|token|htaccess|(^|/)\.env|(^|/)\.git/|node_modules|__pycache__|\.pyc$' <<< "$listing"; then
         die "$archive carries something that must never ship (listed above)"
     fi
-    if grep -E '^(publish-github\.sh|push-source\.sh|publish\.conf|\.publish-allow|Github repository|GITHUB-RELEASE-GUIDE\.md|build\.conf|release-mirror\.conf|PROJECT_NOTES\.md|Packaging\.md|deploy_to_programfiles\.ps1|deploy_log\.txt)$' <<< "$listing"; then
+    if grep -E '^(publish-github\.sh|push-source\.sh|publish\.conf|\.publish-allow|Github repository|GITHUB-RELEASE-GUIDE\.md|build\.conf|release-mirror\.conf|PROJECT_NOTES\.md|deploy_to_programfiles\.ps1|deploy_log\.txt)$' <<< "$listing"; then
         die "$archive carries a local only file (listed above)"
     fi
+    # The locally excluded names are read from .git/info/exclude at the top of
+    # the build and are never spelled out here: this script ships in the
+    # source zip, and a published file must not carry them. Each pattern is
+    # matched as a whole path segment anywhere in the archive.
+    for pat in "${local_patterns[@]}"; do
+        clean="${pat%/}"; clean="${clean#/}"
+        if grep -qE "(^|/)$(glob_to_regex "$clean")(/|$)" <<< "$listing"; then
+            die "$archive carries a locally excluded entry ($clean)"
+        fi
+    done
     grep -q "^$addon_id/addon.xml$" <<< "$listing" || die "$archive has no $addon_id/addon.xml"
 }
 verify_zip "$dist_zip"

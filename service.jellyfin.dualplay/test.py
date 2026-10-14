@@ -21,15 +21,40 @@ from dualplay import (  # noqa: E402
 )
 
 ROLE_GROUP = 2
+HOME_WINDOW_ID = 10000
+RUNNING_PROPERTY = 'JellyDualPlayTestRunning'  # on the Home window while a run is in progress
 
 
 def main():
     """
     <summary>
-    Ping every configured box and show the outcome in an OK dialog, listing the Control settings to check for any that failed.
+    Refuse a second concurrent run, otherwise run the connection test with the Home window flagged for its duration.
     </summary>
     <remarks>
-    In Sync Group mode the device slots are tested; otherwise the single follower.
+    Each unreachable box costs its connect timeout, so a run over several dead slots can take a while; without the flag a second press of the button would start a second run on top of the first. The flag is cleared in a finally so a failure cannot leave the button locked. This runs from the settings dialog, never during Kodi start up, so writing a Home window property here is safe.
+    </remarks>
+    """
+    home = xbmcgui.Window(HOME_WINDOW_ID)
+    dialog = xbmcgui.Dialog()
+    if home.getProperty(RUNNING_PROPERTY) == 'true':
+        dialog.notification('Dual Play', 'Test already running',
+                            xbmcgui.NOTIFICATION_INFO, 2000, False)
+        return
+    home.setProperty(RUNNING_PROPERTY, 'true')
+    try:
+        run(dialog)
+    finally:
+        home.clearProperty(RUNNING_PROPERTY)
+
+
+def run(dialog):
+    """
+    <summary>
+    Ping every configured box and show the outcome in an OK dialog, listing the Control settings to check for any that failed.
+    </summary>
+    <param name="dialog">The xbmcgui.Dialog to show the toasts and the final OK dialog on.</param>
+    <remarks>
+    In Sync Group mode the device slots are tested; otherwise the single follower. A short toast names each box as it is tried, so a run over dead slots shows progress rather than nothing. Line breaks in the dialog are [CR]; a newline renders as nothing in Kodi.
     </remarks>
     """
     group_mode = addon().getSettingInt('role') == ROLE_GROUP
@@ -39,7 +64,6 @@ def main():
         p = peer_from_settings()
         peers = [p] if p.configured else []
 
-    dialog = xbmcgui.Dialog()
     if not peers:
         dialog.ok('Dual Play',
                   'No devices configured.[CR][CR]'
@@ -47,11 +71,12 @@ def main():
                   'tab.[CR]Leader: set the follower address.')
         return
 
-    # Kodi dialogs want [CR] for line breaks, not \n.
     lines = []
     if group_mode:
         lines.append('This device: [B]%s[/B]' % local_device_name())
-    for p in peers:
+    for n, p in enumerate(peers, 1):
+        dialog.notification('Dual Play', 'Testing %s (%d of %d)' % (p.label, n, len(peers)),
+                            xbmcgui.NOTIFICATION_INFO, 2000, False)
         try:
             p.ping()
             state = 'playing' if (p.now_playing() or {}).get('speed') else 'idle'
@@ -64,8 +89,8 @@ def main():
     if any(line.startswith('FAIL') for line in lines):
         lines += ['',
                   'On each unreachable box check Settings > Services > Control:',
-                  '- Allow remote control via HTTP = ON',
-                  '- Allow remote control from other systems = ON']
+                  '1. Allow remote control via HTTP = ON',
+                  '2. Allow remote control from applications on other systems = ON']
     dialog.ok('Dual Play', '[CR]'.join(lines))
 
 

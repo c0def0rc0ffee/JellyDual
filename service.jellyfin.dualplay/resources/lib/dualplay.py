@@ -51,6 +51,9 @@ def setting_str(key, default=''):
     <summary>
     Read a string setting that may not exist (older/newer settings.xml).
     </summary>
+    <param name="key">The setting id.</param>
+    <param name="default">Returned when the setting is missing or blank.</param>
+    <returns>The setting's value, or the default.</returns>
     """
     try:
         return addon().getSettingString(key) or default
@@ -94,6 +97,8 @@ def seconds_to_time(seconds):
     <summary>
     Kodi's Player.Seek wants an hours/minutes/seconds/milliseconds object.
     </summary>
+    <param name="seconds">Position from the start; a negative value is clamped to zero.</param>
+    <returns>A dict with hours, minutes, seconds and milliseconds as ints.</returns>
     """
     if seconds < 0:
         seconds = 0
@@ -127,6 +132,9 @@ def local_rpc(method, params=None):
     <summary>
     Call JSON-RPC on this Kodi instance.
     </summary>
+    <param name="method">The JSON-RPC method name.</param>
+    <param name="params">The params member, or None to send none.</param>
+    <returns>The whole decoded reply as a dict, or an empty dict when the call or the decode failed (the failure is logged).</returns>
     """
     payload = {'jsonrpc': '2.0', 'id': 1, 'method': method}
     if params is not None:
@@ -144,6 +152,7 @@ def local_active_player():
     <summary>
     playerid of this box's video/audio player, or None.
     </summary>
+    <returns>The playerid, or None when nothing is playing or the call failed.</returns>
     """
     for p in local_rpc('Player.GetActivePlayers').get('result') or []:
         if p.get('type') in ('video', 'audio'):
@@ -156,6 +165,8 @@ def local_set_playing(playing):
     <summary>
     Play or pause this box explicitly.
     </summary>
+    <param name="playing">True to play, False to pause.</param>
+    <returns>False when nothing is playing here, else True.</returns>
     <remarks>
     xbmc.Player().pause() is only a toggle, so using it to "resume" also
     pauses if the user happened to pause during the handshake. PlayPause with
@@ -190,12 +201,15 @@ class Peer(object):
         <summary>
         Parse the address and keep the login; nothing is contacted yet.
         </summary>
-        <param name="host">Host name, IP or a pasted URL: a scheme and any path are stripped, and a ':port' suffix overrides the port argument.</param>
+        <param name="host">Host name, IP or a pasted URL: a scheme and any path are stripped, and a ':port' suffix (one to five digits) overrides the port argument. A trailing colon with nothing after it is dropped.</param>
         <param name="port">The JSON-RPC port when the host does not carry one.</param>
         <param name="user">Basic auth user name, or empty.</param>
         <param name="password">Basic auth password, or empty.</param>
         <param name="timeout">Seconds to wait per call unless a call gives its own.</param>
         <param name="name">Display name from the device slot; blank in Leader / Follower mode.</param>
+        <remarks>
+        IPv6 literals are not supported: anything with more than one colon is passed through unchanged, so the resulting URL is whatever the user typed. The settings help asks for an IPv4 address or a host name.
+        </remarks>
         """
         self.name = (name or '').strip()
         self.host = (host or '').strip()
@@ -206,10 +220,12 @@ class Peer(object):
             self.host = self.host[8:]
         # Drop any path pasted along with it ("123.123.123.50:8080/jsonrpc").
         self.host = self.host.split('/', 1)[0]
-        if ':' in self.host and not self.host.startswith('['):
-            head, _, tail = self.host.rpartition(':')
-            if tail.isdigit():
+        if self.host.count(':') == 1:
+            head, _, tail = self.host.partition(':')
+            if head and tail.isdigit() and len(tail) <= 5:
                 self.host, port = head, int(tail)
+            elif head and not tail:
+                self.host = head     # "123.123.123.50:" is a typo, not a port
         self.port = int(port)
         self.user = user or ''
         self.password = password or ''
@@ -241,6 +257,7 @@ class Peer(object):
         <summary>
         What to call this box in logs and notifications.
         </summary>
+        <returns>The slot name when one was given, else the host.</returns>
         """
         return self.name or self.host
 
@@ -253,7 +270,7 @@ class Peer(object):
         <param name="params">The params member, or None to send none.</param>
         <param name="timeout">Seconds to wait, or None for the instance default.</param>
         <returns>The reply's result member, or None when there is none.</returns>
-        <exception cref="PeerError">No address configured, a rejected login (401), any other HTTP error, an unreachable box, or an error member in the reply.</exception>
+        <exception cref="PeerError">No address configured, a rejected login (401), any other HTTP error, an unreachable box, a reply that is not JSON or not a JSON object (something other than Kodi's JSON-RPC answering on that port), or an error member in the reply.</exception>
         """
         if not self.configured:
             raise PeerError('No follower address configured')
@@ -270,7 +287,7 @@ class Peer(object):
             req.add_header('Authorization', 'Basic %s' % token)
         try:
             with urllib.request.urlopen(req, timeout=timeout or self.timeout) as resp:
-                body = json.loads(resp.read().decode('utf-8'))
+                raw = resp.read()
         except urllib.error.HTTPError as exc:
             if exc.code == 401:
                 raise PeerError('Follower rejected the username/password')
@@ -278,20 +295,30 @@ class Peer(object):
         except Exception as exc:
             raise PeerError('Cannot reach follower at %s:%s (%s)'
                             % (self.host, self.port, exc))
+        try:
+            body = json.loads(raw.decode('utf-8'))
+        except (ValueError, UnicodeDecodeError):
+            raise PeerError('%s:%s answered, but not with JSON-RPC: check that %s '
+                            'is the web server port from Settings > Services > Control'
+                            % (self.host, self.port, self.port))
+        if not isinstance(body, dict):
+            raise PeerError('%s:%s sent an unexpected reply (%s), not a JSON-RPC response'
+                            % (self.host, self.port, type(body).__name__))
         if 'error' in body:
             raise PeerError(str(body['error']))
         return body.get('result')
 
     # == convenience wrappers =================================================
 
-    def ping(self):
+    def ping(self, timeout=None):
         """
         <summary>
         JSONRPC.Ping, as a cheap reachability check.
         </summary>
+        <param name="timeout">Seconds to wait, or None for the instance default; the dead box probe passes a short one.</param>
         <returns>The reply, 'pong' on a live box.</returns>
         """
-        return self.call('JSONRPC.Ping')
+        return self.call('JSONRPC.Ping', timeout=timeout)
 
     def notify_cmd(self, action, data=None):
         """
@@ -299,6 +326,8 @@ class Peer(object):
         Announce an imminent command so the peer's own addon knows the
         matching player event is mirrored, not a user action.
         </summary>
+        <param name="action">The message name: open, stop, pause, play, seek, left or joined. Kodi delivers it as 'Other.action'.</param>
+        <param name="data">A JSON serialisable payload, or None to send none.</param>
         <remarks>
         Also used for group housekeeping messages ('left', 'joined'), which
         carry the sending box's name in data rather than driving its player.
@@ -314,6 +343,8 @@ class Peer(object):
         <summary>
         What this box is playing, or None. Used for late-joining a session.
         </summary>
+        <param name="timeout">Seconds to wait for each of the property calls; the active player lookup uses the instance default.</param>
+        <returns>A dict of path, time and total in seconds, and speed; None when idle, when a video screensaver has flagged its clip on that box, or when Kodi reports no file.</returns>
         """
         pid = self.active_player()
         if pid is None:
@@ -463,6 +494,7 @@ def group_from_settings():
     <summary>
     Sync group: the other boxes, from the numbered device slots.
     </summary>
+    <returns>A list of configured Peer in slot order; empty slots are skipped.</returns>
     <remarks>
     Each slot has its own name and address. Entries may carry ":port" for a
     box on a non-standard port; otherwise the shared port setting applies, and
@@ -494,6 +526,7 @@ def local_device_name():
     <summary>
     What this box calls itself in the group.
     </summary>
+    <returns>The device_name setting, else Kodi's System.FriendlyName, else 'Kodi'.</returns>
     """
     name = setting_str('device_name').strip()
     if name:
@@ -509,6 +542,7 @@ def local_open(path):
     <summary>
     Start playing something on this box (used when joining a session).
     </summary>
+    <param name="path">Something Kodi can open: a plugin:// URL or a shared path. Resume is off so playback starts from zero and the join seeks afterwards.</param>
     """
     local_rpc('Player.Open', {'item': {'file': path}, 'options': {'resume': False}})
 
@@ -534,6 +568,7 @@ def local_position():
     <summary>
     This box's own play position, or None.
     </summary>
+    <returns>A dict of time and total in seconds and speed, or None when nothing is playing here.</returns>
     """
     pid = local_active_player()
     if pid is None:
@@ -553,6 +588,7 @@ def resolve_playable_path():
     <summary>
     Work out a path for the currently playing item that the follower can open.
     </summary>
+    <returns>The normalised path, or '' when nothing is playing or Kodi cannot say.</returns>
     <remarks>
     Preference order:
       1. A plugin:// URL (identical on both boxes when both use the same addon).
@@ -603,6 +639,8 @@ def normalize_path(path):
     <summary>
     Turn a path into one another box can open.
     </summary>
+    <param name="path">The path as Kodi reports it on this box; blank is allowed.</param>
+    <returns>The canonical path, or '' for a blank path or a video screensaver clip.</returns>
     <remarks>
     A resolved Jellyfin direct-stream URL is rebuilt as a plugin:// play URL so
     the other box streams through its own Jellyfin session rather than

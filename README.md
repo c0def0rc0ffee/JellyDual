@@ -130,6 +130,9 @@ Everything is logged with the `[service.jellyfin.dualplay]` prefix in
 `python3 tests/test_syncgroup.py` runs the sync-group state machine against
 stubbed Kodi boxes (no Kodi needed): host election, echo suppression, pause and
 resume from non-host devices, departure notices, late join, dead-device
-back-off.
+back-off, the event queue and the exit departure. `tests/test_peer.py` checks
+the JSON-RPC client against a throwaway server on loopback (address parsing,
+auth header, every error path), and `tests/test_testscript.py` checks the Test
+connection button's dialog text and its guard against a second run.
 
 MIT licensed.

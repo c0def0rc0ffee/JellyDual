@@ -223,6 +223,8 @@ class FakeBox(object):
         self.calls = []
         self.playing = None      # dict(path, time, speed)
         self.down = False
+        self.delay = 0.0         # seconds a call to a down box blocks before failing,
+                                 # standing in for the connect timeout
 
     @property
     def configured(self):
@@ -250,11 +252,23 @@ class FakeBox(object):
         Record one call.
         </summary>
         <param name="what">The call text.</param>
-        <exception cref="PeerError">When the box is marked down.</exception>
+        <exception cref="PeerError">When the box is marked down, after the delay.</exception>
         """
         if self.down:
+            if self.delay:
+                time.sleep(self.delay)
             raise PeerError('unreachable')
         self.calls.append(what)
+
+    def ping(self, timeout=None):
+        """
+        <summary>
+        Record a ping; the dead box probe calls this.
+        </summary>
+        <param name="timeout">Ignored.</param>
+        <exception cref="PeerError">When the box is marked down.</exception>
+        """
+        self._rec('ping')
 
     def notify_cmd(self, action, data=None):
         """
@@ -657,7 +671,7 @@ ctl.active_path = 'plugin://x'
 bed.down = True
 ctl.on_pause(FakePlayer())
 assert kit.acts() == ['pause']
-assert ctl.dead.get(0, 0) > time.time()
+assert ctl.dead.get(service.peer_key(bed), 0) > time.time()
 assert any('Bedroom unreachable' in n for n in NOTES), NOTES
 bed.down = False
 del kit.calls[:]
@@ -677,5 +691,205 @@ assert bed.acts() == ['pause'], bed.acts()
 assert not any(c.startswith('announce') for c in bed.calls), bed.calls
 ok('leader mode still honours stop-action and sends no announcements')
 SETTINGS['role'] = 2
+
+print('\n== a dead box never sits on the command path ==')
+ctl, bed, kit = fresh()
+ctl.active_path = 'plugin://x'
+attic = FakeBox('123.123.123.90', 'Attic')
+attic.down, attic.delay = True, 0.3
+ctl.peers = [attic, bed, kit]
+attic_key = service.peer_key(attic)
+stamps = []
+bed_rec = bed._rec
+bed._rec = lambda what: (stamps.append(time.time()), bed_rec(what))
+t0 = time.time()
+ctl.on_pause(FakePlayer())
+assert bed.acts() == ['pause'] and kit.acts() == ['pause'], (bed.acts(), kit.acts())
+assert stamps[0] - t0 < 0.15, 'Bedroom waited %.2fs behind the dead Attic' % (stamps[0] - t0)
+assert attic_key in ctl.dead and any('Attic unreachable' in n for n in NOTES), NOTES
+ok('commands go out in parallel: the live boxes are served while the dead one times out')
+ctl.dead[attic_key] = time.time() - 1          # the back off has lapsed
+del stamps[:]
+del bed.calls[:]
+t0 = time.time()
+ctl.on_pause(FakePlayer())
+assert bed.acts() == ['pause'] and stamps[0] - t0 < 0.15, stamps
+assert attic.calls == [] and attic_key in ctl.dead
+ok('a lapsed back off does not put the dead box back on the command path')
+ctl.probe_dead(block=True)
+assert attic_key in ctl.dead and ctl.dead[attic_key] > time.time()
+ok('probe: a box that fails the ping stays dead for another back off')
+attic.down = False
+ctl.dead[attic_key] = time.time() - 1
+ctl.probe_dead(block=True)
+assert attic_key not in ctl.dead and attic.calls == ['ping'], (ctl.dead, attic.calls)
+del attic.calls[:]
+del bed.calls[:]
+ctl.on_pause(FakePlayer())
+assert attic.acts() == ['pause'] and bed.acts() == ['pause']
+ok('probe: a box that answers is re-admitted and served again')
+ctl.dead[attic_key] = time.time() + 30
+ctl.probe_dead(block=True)
+assert attic_key in ctl.dead
+ok('probe: a box inside its back off is left alone')
+ctl, bed, kit = fresh()
+attic = FakeBox('123.123.123.90', 'Attic')
+attic.down, attic.delay = True, 0.3
+ctl.peers = [attic, bed, kit]
+del local[:]
+ctl.on_start(FakePlayer())
+for b in (bed, kit):
+    assert b.acts() == ['stop', 'open', 'pause', 'seek:900.0', 'play'], b.acts()
+assert attic.calls == [] and local == [False, True]
+assert any('Playing on 3 screens' in n for n in NOTES), NOTES
+ok('handshake with a dead slot: the live boxes start, the dead one is skipped, no "N of M" for it')
+
+print('\n== the join\'s own open announcement is cleared afterwards ==')
+ctl, bed, kit = fresh()
+del opened[:]
+del bed.calls[:]
+
+
+def open_and_fire(path):
+    """
+    <summary>
+    Stand-in for dualplay.local_open that also raises this box's own onAVStarted the way Kodi would, while try_join still holds suspend.
+    </summary>
+    <param name="path">What was opened; recorded in opened.</param>
+    """
+    opened.append(path)
+    ctl.on_start(FakePlayer(playing=True))
+
+
+service.local_open = open_and_fire
+bed.playing = {'path': 'plugin://x', 'time': 50.0, 'total': 5400.0, 'speed': 1}
+ctl.try_join(FakePlayer(playing=False))
+assert ctl.active_path == 'plugin://x' and not ctl.session_host
+assert 'open' not in ctl.expect and ctl.expect_path is None, ctl.expect
+ok('after a join: no stale open announcement is left behind')
+ctl.on_stop()                       # the user stops here ...
+del bed.calls[:]
+del kit.calls[:]
+service.resolve_playable_path = lambda: 'plugin://x'
+ctl.on_start(FakePlayer())          # ... and restarts the same film within 90 s
+assert ctl.session_host and ctl.active_path == 'plugin://x'
+for b in (bed, kit):
+    assert b.acts() == ['stop', 'open', 'pause', 'seek:900.0', 'play'], b.acts()
+ok('restarting the same film after a join hosts it instead of playing alone')
+service.resolve_playable_path = lambda: ABC
+service.local_open = lambda p: opened.append(p)
+
+print('\n== an announcement covers one event only ==')
+ctl, bed, kit = fresh()
+ctl.active_path = 'plugin://x'
+ctl.on_peer_cmd('pause')
+ctl.on_pause(FakePlayer())          # the mirrored pause lands
+assert bed.calls == [] and 'pause' not in ctl.expect
+ctl.on_resume(FakePlayer())         # the user presses play here ...
+del bed.calls[:]
+del kit.calls[:]
+ctl.on_pause(FakePlayer())          # ... and pause again within 3 s
+assert bed.acts() == ['pause'] and kit.acts() == ['pause'], (bed.acts(), kit.acts())
+ok('a user pause right after a mirrored one is propagated, the announcement was used up')
+ctl.expect['play'] = time.time() - 1
+assert not ctl._expected('play') and 'play' not in ctl.expect
+ok('an expired announcement is discarded, not left to match later')
+
+print('\n== player events are queued and drained in order, off the callback ==')
+ctl, bed, kit = fresh()
+ctl.active_path = 'plugin://x'
+bed_rec = bed._rec
+bed._rec = lambda what: (time.sleep(0.05), bed_rec(what))
+dp = service.DualPlayer(ctl)
+t0 = time.time()
+dp.onPlayBackPaused()
+dp.onPlayBackResumed()
+dp.onPlayBackSeek(0, 0)
+dp.onPlayBackStopped()
+returned = time.time() - t0
+ctl.queue.join()
+assert returned < 0.05, 'callbacks blocked for %.2fs' % returned
+assert bed.acts() == ['pause', 'seek:0.2', 'play', 'seek:0.0', 'pause'], bed.acts()
+assert any(c.startswith('announce:left') for c in bed.calls)
+ok('four callbacks returned at once; the worker ran them in order')
+ctl, bed, kit = fresh()
+ctl.active_path = 'plugin://x'
+ctl.ignore_until = time.time() - 0.5
+ctl.on_pause(FakePlayer(), at=time.time() - 1.0)   # delivered inside the echo window, handled late
+assert bed.calls == []
+ctl.on_pause(FakePlayer())
+assert bed.acts() == ['pause']
+ok('an event is judged by when Kodi delivered it, not when the worker got to it')
+
+print('\n== exiting with a session open sends the departure ==')
+ctl, bed, kit = fresh()
+ctl.active_path = 'plugin://x'
+ctl.on_exit()
+for b in (bed, kit):
+    assert b.acts() == ['pause'], b.acts()
+    assert any(c.startswith('announce:left') and 'Lounge' in c for c in b.calls), b.calls
+    assert b.timeout == service.EXIT_TIMEOUT
+assert ctl.active_path is None
+ok('group: exit pauses the others and says who left, with the short timeout')
+ctl, bed, kit = fresh()
+ctl.active_path = 'plugin://x'
+ctl.post(ctl.on_stop, False)        # Kodi's own OnStop still queued at the abort
+ctl.on_exit()
+assert bed.acts() == ['pause'], bed.acts()
+assert sum(1 for c in bed.calls if c.startswith('announce:left')) == 1, bed.calls
+ok('exit: a queued stop event runs once and the departure is not doubled')
+SETTINGS['role'] = 0
+SETTINGS['peer_host'] = '123.123.123.50'
+ctl, bed, kit = fresh(stop_action=0)
+ctl.peers = [bed]
+ctl.active_path = 'plugin://x'
+ctl.on_exit()
+assert bed.acts() == ['stop'], bed.acts()
+ctl, bed, kit = fresh(stop_action=1)
+ctl.peers = [bed]
+ctl.active_path = 'plugin://x'
+ctl.on_exit()
+assert bed.acts() == ['pause'], bed.acts()
+SETTINGS['role'] = 2
+ok('leader: exit applies the stop action')
+ctl, bed, kit = fresh()
+ctl.on_exit()
+assert bed.calls == [] and kit.calls == []
+ok('exit with nothing open sends nothing')
+
+print('\n== the main loop survives a failing drift check or join ==')
+ctl, bed, kit = fresh()
+ctl.drift_check, ctl.drift_interval, ctl.last_drift = True, 0, 0
+
+
+def boom(player):
+    """
+    <summary>
+    Stand-in for check_drift or try_join that always raises.
+    </summary>
+    <param name="player">Ignored.</param>
+    <exception cref="RuntimeError">Always.</exception>
+    """
+    raise RuntimeError('boom')
+
+
+ctl.check_drift = boom
+ctl.tick(FakePlayer())
+ok('tick carries on after a drift check exception')
+ctl.try_join, ctl.last_join = boom, 0
+ctl.tick(FakePlayer())
+ok('tick carries on after a join exception')
+
+print('\n== the dead map is keyed by address and survives a slot edit ==')
+ctl, bed, kit = fresh()
+bed_key = service.peer_key(bed)
+assert bed_key == '123.123.123.60:8080', bed_key
+ctl.dead[bed_key] = time.time() + 30
+ctl.dead['123.123.123.99:8080'] = time.time() + 30     # a slot that is being removed
+ctl.reload_settings()
+assert bed_key in ctl.dead and '123.123.123.99:8080' not in ctl.dead, ctl.dead
+assert [service.peer_key(p) for p in ctl._snapshot_peers()] == \
+    ['123.123.123.60:8080', '123.123.123.70:8090']
+ok('settings reload keeps the back off of a box still configured, drops a removed slot')
 
 print('\n%d checks passed' % len(PASS))
