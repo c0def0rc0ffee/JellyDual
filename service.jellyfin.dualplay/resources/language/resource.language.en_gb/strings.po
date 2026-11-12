@@ -44,7 +44,7 @@ msgid "Enable dual play"
 msgstr ""
 
 msgctxt "#30011"
-msgid "Master switch. When off, this addon does nothing on either box."
+msgid "Master switch. When off, this add-on does nothing on any box."
 msgstr ""
 
 msgctxt "#30012"
@@ -131,7 +131,7 @@ msgid "Test connection"
 msgstr ""
 
 msgctxt "#30029"
-msgid "Checks that the follower answers with these details and shows its Kodi version."
+msgid "Checks that the follower answers with these details and shows its Kodi version. In Sync Group mode it tries every device on the Sync Group tab instead."
 msgstr ""
 
 # == Timing =====================================================================
