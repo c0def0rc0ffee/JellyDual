@@ -1,138 +1,83 @@
-# Jellyfin Dual Play
+<p align="center">
+  <img src="docs/screenshots/banner.png" width="100%" alt="Jellyfin Dual Play: the same film on every Kodi box, in step. Beside the name, three tiles: two TV outlines linked by an arrow, two device name chips reading Living Room and Bedroom, and play and pause symbols over a progress bar">
+</p>
 
-Plays the same thing on two or more Kodi boxes at once, in sync, when all use
-the same Jellyfin server through the Jellyfin for Kodi addon.
+<p align="center">
+  <a href="#quick-start">Quick start</a> · <a href="#sync-group">Sync Group</a> · <a href="#settings">Settings</a> · <a href="#limits">Limits</a> · <a href="SETUP.md">Setup guide</a> · <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-Two modes:
+<p align="center">
+  <img src="https://img.shields.io/badge/version-2.1.4-blue" alt="Version 2.1.4">
+  <img src="https://img.shields.io/badge/licence-MIT-green" alt="MIT licence">
+  <img src="https://img.shields.io/badge/python-3-3776AB?logo=python&logoColor=white" alt="Python 3">
+  <img src="https://img.shields.io/badge/Kodi%2019%2B-service%20add--on-17B2E7?logo=kodi&logoColor=white" alt="Kodi 19 or newer, service add-on">
+</p>
 
-- **Leader / Follower**: two boxes, one-way control from the leader.
-- **Sync Group**: up to eleven boxes, each with its own name. Whichever box
-  you start a film on hosts it and opens it everywhere; pause and resume from
-  **any** box are echoed to all of them. Stopping or exiting anywhere pauses
-  everyone else and tells them which device left, and a box switched on
-  mid-film joins by itself at the right position. Commands are announced over
-  `JSONRPC.NotifyAll` before they land so each box can tell a group command
-  from its own user's button press (that's what stops mirrored commands being
-  re-mirrored forever).
+Plays the same Jellyfin item on two or more Kodi boxes at once, in sync, instead of Jellyfin's SyncPlay, which the Jellyfin for Kodi add-on does not support.
 
-Jellyfin's own **SyncPlay** does not work in the Kodi addon, only the web
-client, Jellyfin Media Player and mpv-shim support it. This addon does the job a
-different way: it drives the second box over Kodi's built-in JSON-RPC API.
+<p align="center">
+  <img src="docs/screenshots/hero.png" width="640" alt="The Jellyfin Dual Play settings in Kodi, Sync Group tab: this device is named Living Room, Device 1 is Bedroom at 123.123.123.60 and Device 2 is Kitchen at 123.123.123.70">
+</p>
 
-## How it works
+## Quick start
 
-One box is the **leader**, the other the **follower**. When you start something
-on the leader, it:
+Every box needs the Jellyfin for Kodi add-on, signed in to the same Jellyfin server.
 
-1. Works out a path the follower can open, a `plugin://plugin.video.jellyfin/…`
-   URL, so the follower streams from Jellyfin using its *own* session rather than
-   piggy-backing on the leader's.
-2. Pauses itself, tells the follower to open that item, and waits for it to load.
-3. Seeks the follower to the leader's position, starts it, gives it a small head
-   start, then releases itself.
+1. Install the add-on on **every** box with *Settings → Add-ons → Install from zip file* (you may need *Unknown sources* on first), or add the [DeliciousCoffee repository](https://github.com/c0def0rc0ffee/DeliciousCoffee) once and Kodi keeps it updated.
+2. On the follower, open *Settings → Services → Control* and turn on **Allow remote control via HTTP** and **Allow remote control from applications on other systems**. Note the port (default 8080), username and password. Its role stays at the default, Follower.
+3. On the leader, open the add-on's settings and set **This box is the** to Leader, then **Follower address** (for example `123.123.123.50`), **Port**, **Username** and **Password**.
+4. Press **Test connection**. It should name the follower's Kodi version.
 
-After that, pause, resume, seek and stop on the leader are forwarded to the
-follower. Every resume also re-seeks the follower, which quietly cleans up any
-drift that crept in.
+<p align="center">
+  <img src="docs/screenshots/test-connection.png" width="640" alt="The Test connection result over the add-on settings: this device is Living Room, and Bedroom and Kitchen both answer OK as Kodi 21.3, idle">
+</p>
 
-## Install
+## Features
 
-> Full walk-through with troubleshooting: see **SETUP.md** in the project
-> folder.
+| | |
+| --- | --- |
+| **Leader and follower**: two boxes, the leader drives. | **Sync Group**: up to eleven named boxes. |
+| **Pause and resume from any box** in a Sync Group. | **Late join**: a box switched on mid film joins at the right point. |
+| **Departure notices** say which device left. | **No extra dependencies**: only Kodi's own Python. |
 
-Install the zip on **both** boxes: *Settings → Add-ons → Install from zip file*.
-(You may need *Unknown sources* enabled first.) Or install the [DeliciousCoffee repository](https://github.com/c0def0rc0ffee/DeliciousCoffee) once and Kodi installs and updates it for you.
+## Sync Group
 
-### On the follower
+For three or more boxes, or to control playback from any of them. On **every** box:
 
-1. *Settings → Services → Control*
-   - **Allow remote control via HTTP** → ON (note the port, default 8080)
-   - **Allow remote control from applications on other systems** → ON
-   - Set a username/password, or clear both if you'd rather not use one.
-2. *Settings → Add-ons → My add-ons → Services → Jellyfin Dual Play → Configure*
-   - **This box is the** → Follower
+- set **This box is the** to *Sync Group member* and give it a **Device name**;
+- switch on HTTP remote control as for the follower, with the same username and password everywhere;
+- on the **Sync Group** tab, list every other box by name and address, in up to ten slots.
 
-That's all the follower needs, the addon itself does nothing there. It's
-installed so you can swap the roles later without reinstalling.
+Whichever box starts a film hosts it and opens it everywhere. Stopping or exiting on any box pauses the others. The [setup guide](SETUP.md#sync-group-many-boxes-start-and-control-from-any-of-them) walks through it.
 
-### On the leader
+<p align="center">
+  <img src="docs/screenshots/notification.png" width="640" alt="A Dual Play notice in the corner of the Kodi settings screen reading Bedroom left the sync group">
+</p>
 
-*Configure* the addon and set:
-
-- **This box is the** → Leader
-- **Follower address** → e.g. `123.123.123.50` (a `123.123.123.50:8080` string
-  works too, the port gets split out)
-- **Port** → matches the follower's setting
-- **Username / Password** → matches the follower's setting, or leave
-  both blank if you disabled auth
-
-Hit **Test connection**. It should report the follower's Kodi
-version.
-
-### Sync Group
-
-For three or more boxes, or to control playback from any of them: on **every**
-box set **This box is the** to the Sync Group member option, give the box a
-**Device name**, switch on HTTP remote control exactly as for the follower
-above, and list every other box on the **Sync Group** tab (up to ten devices,
-each a name and an address). Any box can then start, pause or resume, and a
-box switched on mid-film joins at the right position. **SETUP.md** walks
-through it step by step.
-
-## Settings worth knowing
+## Settings
 
 | Setting | What it does |
 | --- | --- |
-| **Show notifications** | On-screen popups when mirroring starts, when a device cannot be reached, and when a device joins the sync group. A notice that a device left is always shown. |
-| **Start timeout (seconds)** | How long the leader holds before giving up. Raise it if the follower is a slow box or the library is remote. |
-| **Follower head start (ms)** | How far ahead of the leader the follower is released. Raise it if the follower is consistently *behind*; lower it if it's ahead. |
-| **Periodically re-align** | Off by default. Turn on if the two screens are within earshot and slow drift bothers you. |
-| **When this box stops** | Leader/Follower only: what the follower does when the leader stops or exits, stop too (default), pause, or keep playing. A Sync Group always pauses the others and tells them who left. |
+| **Show notifications** | Popups when mirroring starts, a device cannot be reached or a device joins. Departure notices always show. |
+| **Start timeout (seconds)** | How long the leader waits. Raise it for a slow box or remote library. |
+| **Follower head start (ms)** | How far ahead the follower is released. Raise it if the follower lags, lower it if it leads. |
+| **Periodically re-align** | Off by default. Turn on if slow drift bothers you. |
+| **When this box stops** | Leader and follower only: stop, pause or leave the follower playing. A Sync Group always pauses the others. |
 
-## Limits, honestly
+To swap roles, change **This box is the** on each box. Settings reload when the dialog closes, with no restart.
 
-- In Leader/Follower mode control is one-way: pausing on the **follower** does
-  not pause the leader. Use Sync Group mode if you want every box's remote to
-  work.
-- Sync is loose. Expect them to start within about half a second of each other
-  and to stay within a second or two; frame-accurate sync isn't achievable over
-  JSON-RPC polling.
-- Both boxes need to reach each other on the LAN (no client isolation / VLAN
-  blocking between them).
-- Kodi's web server is plain HTTP, so the follower's username and password go
-  over the wire base64-encoded, not encrypted. That's fine on a home LAN; don't
-  reuse a password that matters, and don't expose the follower's web port to
-  the internet.
-- Trick-play on the follower (its own seeking) will desync it until the next
-  pause/resume on the leader.
-- Works in both Jellyfin addon modes, "add-on" (dynamic) and library-sync
-  (native), but both boxes must be in the *same* mode.
+## Limits
 
-## Swapping roles
+- Leader and follower control is one way: pausing the follower does not pause the leader. Use a Sync Group for that.
+- Sync is loose: boxes start within about half a second and stay within a second or two.
+- Every box must reach the others on the LAN, with no client isolation or VLAN blocking.
+- Kodi's web server is plain HTTP, so credentials travel base64 encoded, not encrypted. Do not reuse a password that matters, and never expose the web port to the internet.
+- Every box must use the same Jellyfin add-on mode, add-on (dynamic) or native (library sync).
 
-Change **This box is the** on each box. No restart needed; the addon reloads
-settings when you close the dialog.
+## Troubleshooting and more
 
-## Troubleshooting
+[Troubleshooting](docs/TROUBLESHOOTING.md) · [How it works](docs/HOW-IT-WORKS.md) · [Tests](docs/TESTING.md)
 
-Everything is logged with the `[service.jellyfin.dualplay]` prefix in
-`kodi.log`, enable debug logging and search for that.
+## Licence
 
-- *"Follower unreachable"* → check the Control settings above, and that the port
-  and credentials match.
-- *"Follower did not start playback"* → usually the follower's Jellyfin addon
-  isn't signed in to the same server, or the item id doesn't exist for that user.
-- *Follower plays but the leader's audio is ahead* → raise **Follower head
-  start**.
-
-## Tests
-
-`python3 tests/test_syncgroup.py` runs the sync-group state machine against
-stubbed Kodi boxes (no Kodi needed): host election, echo suppression, pause and
-resume from non-host devices, departure notices, late join, dead-device
-back-off, the event queue and the exit departure. `tests/test_peer.py` checks
-the JSON-RPC client against a throwaway server on loopback (address parsing,
-auth header, every error path), and `tests/test_testscript.py` checks the Test
-connection button's dialog text and its guard against a second run.
-
-MIT licensed.
+MIT. See [LICENSE](service.jellyfin.dualplay/LICENSE).
